@@ -1,0 +1,37 @@
+fileio:
+  outdir: /Users/domi/Desktop/ALPs-Upturns/results/1ES0229+200/baseline/fermi-out
+  logfile: /Users/domi/Desktop/ALPs-Upturns/results/1ES0229+200/baseline/fermi-out/fermi.log
+data:
+  evfile: /Users/domi/Desktop/ALPs-Upturns/data/flat-data/1ES0229+200/events_list.txt
+  scfile: /Users/domi/Desktop/ALPs-Upturns/data/flat-data/spacecraft.fits
+binning:
+  roiwidth: 10.0
+  binsz: 0.1
+  binsperdec: 2
+selection:
+  emin: 1000
+  emax: 300000
+  zmax: 90
+  evclass: 128
+  evtype: 3
+  tmin: 239557417
+  tmax: 681320621
+  ra: 38.2025
+  dec: 20.288
+  filter: DATA_QUAL>0 && LAT_CONFIG==1
+  roicut: 'yes'
+gtlike:
+  edisp: true
+  edisp_bins: 0
+  edisp_disable:
+  - isodiff
+  - galdiff
+  irfs: P8R3_SOURCE_V3
+model:
+  src_roiwidth: 20.0
+  extdir: /Users/domi/Desktop/ALPs-Upturns/data/fermipy-data
+  galdiff: gll_iem_v07.fits
+  isodiff: iso_P8R3_SOURCE_V3_v1.txt
+  catalogs:
+  - gll_psc_v35.fit
+  sources: []
