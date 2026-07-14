@@ -86,9 +86,24 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
-# Ignore datasets and output folders (at least for now)
-data/
-results/
+# Datasets and output folders (at least for now)
+fermipy-data/
+flat-data/
+gammapy-data/
+hess-data/
+
+# FermiPy and GammaPy output files
+fermi-out/
+gamma-out/
+
+# Logs
+logs/
+
+# Results (for now)
+alps/
+fermi-out/
+gamma-out/
+logs/
 
 # Previously-developed code
 legacy/
@@ -121,9 +136,6 @@ montecarlo/
 *.fls
 *.nav
 *.snm
-
-# Ignore results for now
-results/
 
 # Bash
 .*.sh.swp
