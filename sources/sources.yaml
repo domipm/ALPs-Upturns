@@ -1,0 +1,265 @@
+# Data for each source obtained from:
+# "The Astrophysical Search for Axion Like Particle Signatures in Gamma-Ray Propagation" - Rahul Joseph Cecil (PhD Thesis, Universität Hamburg)
+# VizieR 4FGL Catalog Search https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=IX/67 (University of Strasbourg)
+# SIMBAD Astronomical Database https://simbad.cds.unistra.fr/simbad/ (University of Strasbourg)
+# TeVCat Catalog for Very High Energy Gamma-Ray Astronomy https://www.tevcat.org/ (S. P. Wakely, D. Horanm; International Cosmic Ray Conference)
+
+# NOTE: This file must be constructed manually. 
+# TODO: Running "sources.py" updates the information?
+
+sources:
+
+
+  # Rahul's PhD Thesis Sources
+
+
+  1ES0229+200:
+  
+    # Target name
+    target: "1ES 0229+200"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0232.8+2018"
+    # Redshift
+    z: 0.1396
+    # Position RA
+    ra: 38.2025
+    # Position DEC
+    dec: 20.2880
+    # Exclusion regions
+    xcl: []
+    # Bayesian blocks (after time segmentation)
+    bblocks: None
+
+  1ES0347-121:
+
+    # Target name
+    target: "1ES 0347-121"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0349.4-1159"
+    # Redshift
+    z: 0.1880
+    # Position RA
+    ra: 57.3467
+    # Position DEC
+    dec: -11.9908
+    # Exclusion regions
+    xcl: []
+
+  1ES0414+009:
+
+    # Target name
+    target: "1ES 0414+009"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0416.9+0105"
+    # Redshift
+    z: 0.2870
+    # Position RA
+    ra: 64.2183
+    # Position DEC
+    dec: 1.0900
+    # Exclusion regions
+    xcl: []
+
+  1ES1101-232:
+
+    # Target name
+    target: "1ES 1101-232"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1103.6-2329"
+    # Redshift
+    z: 0.1860
+    # Position RA
+    ra: 165.9071
+    # Position DEC
+    dec: -23.4919
+    # Exclusion regions
+    xcl: [] 
+  
+  1ES1312-423:
+
+    # Target name
+    target: "1ES 1312-423"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1315.0-4236"
+    # Redshift
+    z: 0.1050
+    # Position RA
+    ra: 198.7642
+    # Position DEC
+    dec: -42.6139
+    # Exclusion regions (Size apparent angular size, largest dimension) 
+    xcl: [{"name": "Cen A", "ra": 201.365, "dec": -43.019, "size": 0.4283}]  
+
+  1RXSJ101015.9-311909:
+
+    # Target name
+    target: "1RXS J101015.9-311909"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1010.2-3119"
+    # Redshift
+    z: 0.1420
+    # Position RA
+    ra: 152.5662
+    # Position DEC
+    dec: -31.3193
+    # Exclusion regions
+    xcl: []
+
+  H2356-309:
+
+    # Target name
+    target: "H2356-309"
+    # 4FGL Target name
+    target_4FGL: "4FGL J2359.0-3038"
+    # Redshift
+    z: 0.1650
+    # Position RA
+    ra: 359.7825
+    # Position DEC
+    dec: -30.6275
+    # Exclusion regions
+    xcl: []
+
+  PG1553+113:
+
+    # Target name
+    target: "PG 1553+113"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1555.7+1111"
+    # Redshift
+    z: 0.4339
+    # Position RA
+    ra: 238.9293
+    # Position DEC
+    dec: 11.1901
+    # Exclusion regions
+    xcl: []
+
+  PKS0447-439:
+
+    # Target name
+    target: "PKS 0447-439"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0449.4-4350"
+    # Redshift
+    z: 0.3430
+    # Position RA
+    ra: 72.3529
+    # Position DEC
+    dec: -43.8358
+    # Exclusion regions
+    xcl: []
+
+  PKS1510-089:
+
+    # Target name
+    target: "PKS 1510-089"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1512.8-0906"
+    # Redshift
+    z: 0.3610
+    # Position RA
+    ra: 228.2106
+    # Position DEC
+    dec: -9.1000
+    # Exclusion regions
+    xcl: []
+
+  PKS2155-304:
+
+    # Target name
+    target: "PKS 2155-304"
+    # 4FGL Target name
+    target_4FGL: "4FGL J2158.8-3013"
+    # Redshift
+    z: 0.1170
+    # Position RA
+    ra: 329.7167
+    # Position DEC
+    dec: -30.2256
+    # Exclusion regions
+    xcl: []
+
+
+  # MSc Thesis New Sources
+
+
+  PKS0903-57:
+
+    # Target name
+    target: "PKS 0903-57"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0904.9-5734"
+    # Redshift
+    z: 0.2621
+    # Position RA
+    ra: 136.2315
+    # Position DEC
+    dec: -57.5833
+    # Exclusion regions
+    xcl: []
+
+  PKS0346-27:
+
+    # Target name
+    target: "PKS 0346-27"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0348.6-2749"
+    # Redshift
+    z: 0.9900
+    # Position RA
+    ra: 57.1538
+    # Position DEC
+    dec: -27.8215
+    # Exclusion regions
+    xcl: []
+
+  3C279:
+
+    # Target name
+    target: "3C279"
+    # 4FGL Target name
+    target_4FGL: "4FGL J1256.1-0547"
+    # Redshift
+    z: 0.5354
+    # Position RA
+    ra: 194.0415
+    # Position DEC
+    dec: -5.7887
+    # Exclusion regions
+    xcl: []
+
+
+  # Other sources
+
+  
+  GRB180720B:
+
+    # Target name
+    target: "GRB 180720B"
+    # 4FGL Target name
+    target_4FGL: ""
+    # Redshift
+    z: 0.6530
+    # Position RA
+    ra: 0.5316
+    # Position DEC
+    dec: -2.9350
+    # Exclusion regions
+    xcl: [{"name": "Star", "ra": 0.4542, "dec": -3.0275, "size": 0.3}]
+
+  # Other sources
+  PKS0625-354:
+
+    # Target name
+    target: "PKS0625-354"
+    # 4FGL Target name
+    target_4FGL: "4FGL J0627.0-3529"
+    # Redshift
+    z: 0.056
+    # Position RA
+    ra: 96.7779
+    # Position DEC
+    dec: -35.4876
+    # Exclusion regions
+    xcl: []

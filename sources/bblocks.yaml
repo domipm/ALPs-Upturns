@@ -1,0 +1,125 @@
+1ES0229+200:
+  block1:
+    tmin: 53259.059747499996
+    tmax: 58491.857884074074
+    model: PowerLaw
+
+1ES0347-121:
+  block1:
+    tmin: 53973.15004842592
+    tmax: 56657.902664166664
+    model: PowerLaw
+
+1ES0414+009:
+  block1:
+    tmin: 53646.084967407405
+    tmax: 55486.054654907406
+    model: PowerLaw
+
+1ES1101-232:
+  block1:
+    tmin: 53112.749967407406
+    tmax: 53849.83472435185
+    model: PowerLaw
+  block2:
+    tmin: 53878.78105537037
+    tmax: 58631.81699287037
+    model: PowerLaw
+
+1ES1312-423:
+  block1:
+    tmin: 53110.89864796296
+    tmax: 55389.77900675926
+    model: PowerLaw
+
+1RXSJ101015.9-311909:
+  block1:
+    tmin: 54090.090627129626
+    tmax: 55303.80207388889
+    model: PowerLaw
+
+3C279:
+  block1:
+    tmin: 58142.067768333334
+    tmax: 58147.13029148148
+    model: PowerLaw
+
+# GRB180720B:
+
+H2356-309:
+  block1:
+    tmin: 53172.132895648145
+    tmax: 55143.81580074074
+    model: PowerLaw
+
+PG1553+113:
+  block1:
+    tmin: 56446.8640762037
+    tmax: 58613.97855537037
+    model: PowerLaw
+
+PKS0346-27:
+  block1:
+    tmin: 59521.93637944444
+    tmax: 59522.016749814815
+    model: PowerLaw
+
+PKS0447-439:
+  block1:
+    tmin: 55144.963428055555
+    tmax: 55537.95019888889
+    model: PowerLaw
+
+PKS0903-57:
+  block1:
+    tmin: 58952.74927296296
+    tmax: 58952.89121740741
+    model: LogParabola
+  block2:
+    tmin: 58953.74872898148
+    tmax: 58954.808173425925
+    model: PowerLaw
+  block3:
+    tmin: 58954.76841648148
+    tmax: 58956.87058083333
+    model: PowerLaw
+
+PKS1510-089:
+  block1:
+    tmin: 54910.988647962964
+    tmax: 57518.972293796294
+    model: PowerLaw
+
+PKS2155-304:
+  block1:
+    tmin: 53916.11445814815
+    tmax: 53943.09264101851
+    model: PowerLaw
+  block2:
+    tmin: 53944.02539564815
+    tmax: 53944.08729379629
+    model: PowerLaw
+  block3:
+    tmin: 53944.85458546296
+    tmax: 53945.10265259259
+    model: LogParabola
+  block4:
+    tmin: 53945.85113638889
+    tmax: 53946.17208546296
+    model: LogParabola
+  block5:
+    tmin: 53946.87999055556
+    tmax: 53947.16144888889
+    model: LogParabola
+  block6:
+    tmin: 53948.024249814815
+    tmax: 53948.16311555555
+    model: PowerLaw
+  block7:
+    tmin: 53949.999816944444
+    tmax: 53951.149041481476
+    model: PowerLaw
+  block8:
+    tmin: 53952.06900675926
+    tmax: 53998.96533777777
+    model: LogParabola

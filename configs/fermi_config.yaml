@@ -1,0 +1,77 @@
+# TEMPLATE FERMIPY CONFIG FILE
+
+# INPUT/OUTPUT FILES
+fileio:
+  # Output directory and log file (relative to script PWD or absolute path)
+  outdir     : "$RESULTS/target/fermi-out/"
+  logfile    : "$RESULTS/target/fermi-out/fermi.log"
+
+# DATA FILES
+data:
+  # Photon file or list of events (with absolute paths to fits files)
+  evfile : "$FLAT_DATA/target/events_list.txt"
+  # Spacecraft file
+  scfile : "$FLAT_DATA/target/spacecraft.fits"
+
+# BINNING: Control the spatial and spectral binning of the data.
+binning:
+  # Width of ROI in degrees
+  roiwidth   : 10.0
+  # Spatial bin size in degrees
+  binsz      : 0.1
+  # Number of energy bins per decade
+  binsperdec : 2
+
+# SELECTION
+selection :
+  # Energy (minimum) [MeV] - Start at 1 GeV
+  emin    : 1000
+  # Energy (maximum) [MeV] - Limit to 300 GeV
+  emax    : 300000
+  # Maximum zenith angle (reduce contamination from Earth's background)
+  zmax    : 90
+  # Event class
+  evclass : 128
+  # Event type
+  evtype  : 3
+  # Time (start) - 2008-08-04 15:43:36
+  tmin    : 239557417
+  # Time (end) - 2022-08-04 15:43:36
+  tmax    : 681320621
+  # Right ascension of target
+  ra      : 00.0000
+  # Declination of target
+  dec     : 00.0000
+  # Select times when data quality is good (>0), lat in normal configuration (==1) 
+  # optionally, add 'ABS(ROCK_ANGLE) < 52'
+  filter : 'DATA_QUAL>0 && LAT_CONFIG==1'
+  # Exclude time intervals when the Earth's limb intersects the selected region of interest
+  roicut : 'yes'
+
+# GTLIKE: Control the setup of the likelihood analysis
+gtlike:
+  # Enable the correction for energy dispersion
+  edisp : True
+  # Number of bins to use for energy correction
+  edisp_bins : 0 # DO NOT CHANGE edisp_bins will be handled by Gammapy
+  # List of sources for which energy dispersion correction disabled
+  edisp_disable : ['isodiff','galdiff']
+  # Set the instrument response function
+  irfs  : 'P8R3_SOURCE_V3'
+
+# MODEL: Control the inclusion of point-source and diffuse components in the model
+model:
+  # Width of square region in degrees centered on the ROI that selects
+  # sources for inclusion in the model
+  src_roiwidth      : 20.0
+  # Directory that will be searched for extended source FITS templates
+  # (takes precedence over catalog source templates)
+  extdir            : "$FERMIPY_DATA"
+  # Path to IEM galactic diffuse mapcube
+  galdiff           : 'gll_iem_v07.fits'
+  # Path to isotropic diffuse template
+  isodiff           : '$FERMIPY_DATA/iso_P8R3_SOURCE_V3_v1.txt'
+  # Name of catalog to use
+  catalogs          : ['gll_psc_v35.fit'] # ['4FGL']
+  # Custom sources (default none)
+  sources           : []
