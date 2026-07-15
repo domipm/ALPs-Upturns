@@ -86,11 +86,15 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
-# Datasets and output folders (at least for now)
+# Datasets and output folders
 fermipy-data/
-flat-data/
 gammapy-data/
-hess-data/
+# Ignore Fermi-LAT data except auxiliary shell script
+data/flat-data/*
+!data/flat-data/*.sh
+# Ignore HESS data except auxiliary shell script
+data/hess-data/*
+!data/hess-data/*.sh
 
 # FermiPy and GammaPy output files
 fermi-out/
