@@ -12,7 +12,6 @@ import  numpy               as      np
 import  matplotlib.pyplot   as      plt
 from    mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from    mpl_toolkits.axes_grid1.inset_locator import mark_inset
-from    mpl_toolkits.axes_grid1.inset_locator import InsetPosition
 
 from    pathlib             import  Path
 
@@ -21,20 +20,21 @@ from    astropy.table       import  Table
 
 from    scipy.interpolate   import  RectBivariateSpline
 
-from    utils               import  get_source_list, parse_kwargs
+from    alpsup.utils    import  get_source_list, parse_kwargs
+from    alpsup.paths    import  get_results_dir
 
 
 # Define default ALP couplings values
 GALP_DEFAULT  = np.logspace(-2, +1, 30)
 # Define default pattern for block naming
-BLOCK_PATTERN = re.compile(r"^block(\d+)-(.+)$")
+BLOCK_PATTERN = re.compile(r"^block(\d+)")
 # Define labels for each dataset
 DATASET_LABEL = {"hess": "H.E.S.S.", "hess_bias": "H.E.S.S.",
                  "joint": r"$\it{Fermi}$-LAT + H.E.S.S.", "joint_bias": r"$\it{Fermi}$-LAT + H.E.S.S."}
 # Define markers for each EBL
-EBL_MARKERS = {"dominguez": "o", "finke2022": "s", "franceschini": "^", "saldanalopez": "v"}
+EBL_MARKERS = {"dominguez": "o", "finke2022": "s", "franceschini": "^", "saldana-lopez": "v"}
 # Define labels for each EBL
-EBL_LABELS = {"dominguez": "Domínguez et al. (2011)", "finke2022": "Finke et al. (2022)", "franceschini": "Franceschini et al. (2008)", "saldanalopez": "Saldana-López et al. (2021)"}
+EBL_LABELS = {"dominguez": "Domínguez et al. (2011)", "finke2022": "Finke et al. (2022)", "franceschini": "Franceschini et al. (2008)", "saldana-lopez": "Saldana-López et al. (2021)"}
 
 
 # Utilities for astropy.table.Table objects
@@ -70,7 +70,7 @@ def get_block_dict(ebl: str) -> dict[str, list[str]]:
     # Loop over all sources
     for target in targets:
         # Check if folder exists
-        target_path = Path(f"{os.environ['RESULTS']}/{target}/")
+        target_path = get_results_dir(target)
         if not target_path.is_dir():
             print(f"Warning: {target} folder not found — skipping!")
             continue
@@ -79,7 +79,7 @@ def get_block_dict(ebl: str) -> dict[str, list[str]]:
             (p.name for p in target_path.iterdir()
              if p.is_dir()
              and BLOCK_PATTERN.match(p.name)
-             and BLOCK_PATTERN.match(p.name).group(2) == ebl),
+             and BLOCK_PATTERN.match(p.name)),
             key = lambda name: int(BLOCK_PATTERN.match(name).group(1)), )
         # Add valid blocks to list
         if valid:
@@ -165,7 +165,9 @@ def plot_interp_histogram(ts: np.ndarray, c_alp: float, c_noalp: float, c_min: f
     # ax.legend()
     ax.grid(alpha = 0.3)
     # Save figure
-    fig.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/alps/interp_ts_hist.png", dpi = 300, bbox_inches="tight")
+    os.makedirs(get_results_dir(target, bblock, ebl, output = "alps"), exist_ok = True)
+    fig.savefig(get_results_dir(target, bblock, ebl, output = "alps").joinpath("interp_ts_hist.png"),
+                dpi = 300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -179,9 +181,9 @@ def plot_constraint_curve(couplings: np.ndarray, constraint_table: Table, ebl: s
     """
 
     # Load constraint table from file if found
-    constraint_table = Table.read(f"{os.environ['RESULTS']}/ALPs/{ebl}/alp_constraint_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv")
+    constraint_table = Table.read(get_results_dir("ALPs", ebl) / f"alp_constraint_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv")
     # Load the detection significance table
-    sigma_table = Table.read(f"{os.environ['RESULTS']}/ALPs/{ebl}/alp_significance_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv")
+    sigma_table = Table.read(get_results_dir("ALPs", ebl) / f"alp_significance_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv")
 
     # Initialize plots
     fig, ax = plt.subplots()
@@ -214,10 +216,9 @@ def plot_constraint_curve(couplings: np.ndarray, constraint_table: Table, ebl: s
                label = r"Wilks' 95% CL ($\Delta C = 2.71$)")
 
     # Add text annotation
-    # TODO: FIX DEPRECATION WARNING
     text = (f"EBL {EBL_LABELS.get(ebl, "ModelName")}" + "\n" 
-            + rf"$TS = {float(sigma_table["ts_alp"]):.3f} \, (\sigma \sim {float(sigma_table["sigma"]):.2f})$" + "\n"
-            + rf"$g_{{a\gamma, \text{{min}}}} = {float(sigma_table["g_min"]):.3f} \cdot 10^{{-11}} \, \text{{GeV}}^{{-1}}$" )
+            + rf"$TS = {float(sigma_table["ts_alp"].value[0]):.3f} \, (\sigma \sim {float(sigma_table["sigma"].value[0]):.2f})$" + "\n"
+            + rf"$g_{{a\gamma, \text{{min}}}} = {float(sigma_table["g_min"].value[0]):.3f} \cdot 10^{{-11}} \, \text{{GeV}}^{{-1}}$" )
     ax.text(0.025, 0.975, text,
             fontdict = {"fontsize": 8},
             transform = ax.transAxes, 
@@ -253,10 +254,7 @@ def plot_ebl_comparison(couplings: np.ndarray, ebl_models: list[str], odir: Path
 
     # Loop over each EBL model
     for k, ebl in enumerate(ebl_models):
-        if ebl == "saldanalopez":
-            fpath = odir / f"{ebl}/alp_upturns_{dataset}_saldanalopez_m{malp}_B0{b0}.ecsv"
-        else:
-            fpath = odir / f"{ebl}/alp_upturns_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv"
+        fpath = odir / f"{ebl}/alp_upturns_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv"
         try:
             table = ascii.read(fpath, format="ecsv")
         except FileNotFoundError:
@@ -286,10 +284,7 @@ def plot_ebl_comparison(couplings: np.ndarray, ebl_models: list[str], odir: Path
     if kwargs.get("add_inset", False):
         axins = inset_axes(ax, width="40%", height="40%", loc="center left", bbox_to_anchor=(0.05, 0.025, 1, 1), bbox_transform=ax.transAxes)
         for k, ebl in enumerate(ebl_models):
-            if ebl == "saldanalopez":
-                fpath = odir / f"{ebl}/alp_upturns_{dataset}_saldanalopez_m{malp}_B0{b0}.ecsv"
-            else:
-                fpath = odir / f"{ebl}/alp_upturns_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv"
+            fpath = odir / f"{ebl}/alp_upturns_{dataset}_{ebl}_m{malp}_B0{b0}.ecsv"
             try:
                 table = ascii.read(fpath, format="ecsv")
             except FileNotFoundError:
@@ -323,7 +318,7 @@ def process_ebl(ebl: str, results_dir: Path, odir: Path, args: argparse.Namespac
     """Run the full interpolation pipeline for one EBL model."""
 
     # Create sub-folder for intermediate results
-    odir = Path(f"{os.environ['RESULTS']}/ALPs/{ebl}")
+    odir = get_results_dir("ALPs") / ebl
     odir.mkdir(parents = True, exist_ok = True)
 
     # Get available blocks for EBL
@@ -378,7 +373,7 @@ def process_ebl(ebl: str, results_dir: Path, odir: Path, args: argparse.Namespac
         for block in blocks:
             print(f"  Block: {block}")
 
-            cstat_path = (results_dir / target / block
+            cstat_path = (results_dir / target / block / "ebl" / ebl
                           / "gamma-out" / f"upturns_cstat_{dataset}.npz")
             try:
                 cstat = np.load(cstat_path)
@@ -387,12 +382,8 @@ def process_ebl(ebl: str, results_dir: Path, odir: Path, args: argparse.Namespac
                 continue
 
             for k, galp in enumerate(args.galp):
-                if ebl == "saldanalopez":
-                    popt_path = (results_dir / target / "alps"
-                             / f"popt_saldana-lopez_m{args.malp}_g{galp}_B0{args.b0}.npy")
-                else:
-                    popt_path = (results_dir / target / "alps"
-                             / f"popt_{ebl}_m{args.malp}_g{galp}_B0{args.b0}.npy")
+                popt_path = (results_dir / target / "alps"  
+                            / f"popt_{ebl}_m{args.malp}_g{galp}_B0{args.b0}.npy")
                 try:
                     popt = np.load(popt_path)
                 except Exception as e:
@@ -500,8 +491,7 @@ if __name__ == "__main__":
                         help = "Dataset used for upturn searches")
     # EBL model
     parser.add_argument("--ebl", nargs = "+", required = True, # default = ["dominguez"],
-                        # TODO: FIX SALDANA-LOPEZ FOLDERS!
-                        choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez", "saldanalopez"],
+                        choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez"],
                         help = "EBL model(s) to process (default: dominguez)")
     # ALP parameters
     parser.add_argument("--malp", default = 1e-3, type = float,
@@ -530,7 +520,7 @@ if __name__ == "__main__":
         kwargs = {}
 
     # Define and create directory for ALP final results
-    results_dir = Path(f"{os.environ['RESULTS']}/ALPs/")
+    results_dir = get_results_dir("ALPs")
     results_dir.mkdir(parents = True, exist_ok = True)
 
     # Plots only
@@ -556,7 +546,7 @@ if __name__ == "__main__":
         print(f"Processing EBL: {ebl}...")
         # Process for current EBL model for all available pairs of target/block
         # (unless single target/block specified via args parameter)
-        process_ebl(ebl, Path(f"{os.environ['RESULTS']}"), results_dir, args, **kwargs, )
+        process_ebl(ebl, get_results_dir(), results_dir, args, **kwargs, )
 
     # If more than one EBL model given, generate comparison plots
     if len(args.ebl) > 1:

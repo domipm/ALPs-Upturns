@@ -13,7 +13,8 @@ from    scipy.optimize              import  curve_fit
 from    gammaALPs.core              import  Source, ALP, ModuleList
 from    gammaALPs.base              import  environs, transfer
 
-from    utils                       import  get_source_info, parse_kwargs, get_source_list
+from    alpsup.utils                import  get_source_info, parse_kwargs, get_source_list
+from    alpsup.paths                import  get_results_dir
 
 
 # Define default grid for ALP masses [neV]
@@ -71,9 +72,9 @@ if __name__ == "__main__":
         target_4FGL, target_position, target_redshift = get_source_info(target)
 
         # Define output directories saved to "alps" subfolder of target
-        dir_out = Path( f"{os.environ["RESULTS"]}/{target}/alps/" )
+        dir_aout = get_results_dir(target, output = "alps")
         # Create directories if not found
-        os.makedirs(name = dir_out, exist_ok = True)
+        os.makedirs(name = dir_aout, exist_ok = True)
 
         # Set plotting colors for each coupling
         cmap = plt.get_cmap("tab20b")
@@ -266,9 +267,9 @@ if __name__ == "__main__":
                         ax2.loglog(ml.EGeV, p, color = colors[j], label = "ALP Simulation (" + r"$g_{a\gamma} = $" + f"{g_alp}" + r" [GeV$^{-1}$])")
 
             # Save all files as numpy objects
-            np.save(file = dir_out.joinpath(f"popt_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = popt_list)
-            np.save(file = dir_out.joinpath(f"pcov_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = pcov_list)
-            np.save(file = dir_out.joinpath(f"chisq_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = chisq_list)
+            np.save(file = dir_aout.joinpath(f"popt_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = popt_list)
+            np.save(file = dir_aout.joinpath(f"pcov_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = pcov_list)
+            np.save(file = dir_aout.joinpath(f"chisq_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.npy"), arr = chisq_list)
 
         # If plot iter not none, generate plot
         if args.plot_iter != -1:
@@ -287,7 +288,7 @@ if __name__ == "__main__":
 
             # ax1.legend(loc = 'center left', bbox_to_anchor = (1.015, 0.5))
             ax1.legend(loc = 'upper left')
-            fig1.savefig(dir_out.joinpath(f"alps_{ebl_model}_m{m_alp}_g{args.galp}_B0{B0}.pdf"), bbox_inches = "tight")
+            fig1.savefig(dir_aout.joinpath(f"alps_{ebl_model}_m{m_alp}_g{args.galp}_B0{B0}.pdf"), bbox_inches = "tight")
             
             # Save photon survival probability plot
             ax2.set_xlim(1e1, 3e4)
@@ -297,4 +298,4 @@ if __name__ == "__main__":
             ax2.set_title(f"{target} Photon Survival Probability")
             
             ax2.legend()
-            fig2.savefig(dir_out.joinpath(f"psp_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.pdf"), bbox_inches = "tight")
+            fig2.savefig(dir_aout.joinpath(f"psp_{ebl_model}_m{m_alp}_g{g_alp}_B0{B0}.pdf"), bbox_inches = "tight")

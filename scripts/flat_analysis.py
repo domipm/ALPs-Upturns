@@ -23,8 +23,10 @@ from    gammapy.estimators          import  FluxPointsEstimator
 from    gammapy.modeling            import  Fit
 from    gammapy.modeling.models     import  Models
 
-from    utils                       import  parse_kwargs, get_source_info, get_fermipy_models, get_source_list, get_edec, gen_dirs, init_log
-from    plots                       import  plot_sed_gammapy, plot_sed_compare
+from    alpsup.utils                import  parse_kwargs, get_source_info, get_fermipy_models, get_source_list, get_edec, tab_uconv
+from    alpsup.logs                 import  init_log
+from    alpsup.paths                import  get_results_dir
+from    alpsup.plots                import  plot_sed_gammapy, plot_sed_compare
 
 
 def plot_flat_diagnostics(target, dataset, bblock):
@@ -82,7 +84,7 @@ def plot_flat_diagnostics(target, dataset, bblock):
     dataset.edisp.get_edisp_kernel().plot_matrix(ax = ax12)
 
     plt.tight_layout()
-    plt.savefig("{}/{}/{}/gamma-out/flat_diagnostic.png".format(os.environ['RESULTS'], target, bblock), dpi = 300, bbox_inches = "tight")
+    plt.savefig(f"{dir_gout}/flat_diagnostic.png", dpi = 300, bbox_inches = "tight")
     plt.close()
 
     fig, ax = plt.subplots(nrows = 3, ncols = 1, figsize = (8, 14))
@@ -99,7 +101,7 @@ def plot_flat_diagnostics(target, dataset, bblock):
     ax[2].set_title("Isotropic Diffuse Background Spectral Flux")
     dataset.models["Isotropic"].spectral_model.plot(ax = ax[2], energy_bounds = [50e-3, 2000] * u.GeV, yunits = u.Unit("1 / (cm2 MeV s)"))
 
-    plt.savefig("{}/{}/{}/gamma-out/flat_diffuse.png".format(os.environ['RESULTS'], target, bblock), dpi = 300, bbox_inches = "tight")
+    plt.savefig(f"{dir_gout}/flat_diffuse.png", dpi = 300, bbox_inches = "tight")
     plt.close()
 
     return
@@ -130,12 +132,11 @@ if __name__ == "__main__":
     target_4FGL, target_position, target_redshift = get_source_info(target)
 
     # Generate and check directories
-    gen_dirs(target, bblock = args.bblock)
+    # gen_dirs(target, bblock = args.bblock)
 
     # Define output directories
-    dir_base = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock)}/" )
-    dir_gout = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock)}/gamma-out/" )
-    dir_pout = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock)}/plots/" )
+    dir_gout = get_results_dir(target, args.bblock, ebl = None, output = "gamma-out")
+    dir_fout = get_results_dir(target, args.bblock, ebl = None, output = "fermi-out")
 
     # If --plots-only, generate SED and FermiPy/GammaPy SED comparison
     if args.plots_only:
@@ -160,7 +161,7 @@ if __name__ == "__main__":
 
     log.info("Loading Fermi-LAT model")
     # Read dataset based on fermipy configuration and output files
-    reader = FermipyDatasetsReader(f"{os.environ['RESULTS']}/{target}/{args.bblock}/fermi_config.yaml", edisp_bins = 0)
+    reader = FermipyDatasetsReader(f"{get_results_dir(target, args.bblock)}/fermi_config.yaml", edisp_bins = 0)
     # Select only Fermi-LAT dataset
     dataset_flat = reader.read()[0].copy(name = "Fermi-LAT")
 
@@ -169,7 +170,7 @@ if __name__ == "__main__":
     dataset_flat.exposure = dataset_flat.exposure.pad(50)
     dataset_flat.background = dataset_flat.background.pad(50)
 
-    dataset_flat.exposure = Map.read(f"{os.environ['RESULTS']}/{target}/{args.bblock}/fermi-out/bexpmap_00.fits").interp_to_geom(dataset_flat.exposure.geom)
+    dataset_flat.exposure = Map.read(f"{dir_fout}/bexpmap_00.fits").interp_to_geom(dataset_flat.exposure.geom)
 
     # Define energy dispersion (identity matrix, disable edisp)
     edisp = EDispKernelMap.from_diagonal_response(
@@ -203,11 +204,11 @@ if __name__ == "__main__":
         geom = dataset_flat.exposure.geom, name = "Models Background", )
 
     # Add name for serialization
-    models_out.spatial_model.filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_models_background.fits"
+    models_out.spatial_model.filename = f"{dir_gout}/flat_models_background.fits"
     # Add dataset name to model
     models_out.datasets_names = "Fermi-LAT"
     # Write out spatial model to file
-    models_out.spatial_model.write(filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_models_background.fits", overwrite = True)
+    models_out.spatial_model.write(filename = f"{dir_gout}/flat_models_background.fits", overwrite = True)
 
     # Add all models to our dataset
     dataset_flat.models = Models( [
@@ -263,7 +264,6 @@ if __name__ == "__main__":
     fit_flat_result = fit_flat.run(datasets = [dataset_flat])
     log.info("Fit done!")
 
-
     # Display result of fit
     log.info(fit_flat_result)
     # Display final model of target source
@@ -287,19 +287,19 @@ if __name__ == "__main__":
 
     # Save fit result to file
     fit_flat_result.write(
-        path = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_fit.yaml", 
+        path = dir_gout.joinpath("flat_fit.yaml"), 
         overwrite = True, overwrite_templates = True, )
     
     # Save final datasets and models
     datasets_flat.write(
-        filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_datasets.yaml",
-        filename_models = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_models.yaml",
+        filename = dir_gout.joinpath("flat_datasets.yaml"),
+        filename_models = dir_gout.joinpath("flat_models.yaml"),
         overwrite = True, )
     
     # Save flux points table as csv file
     ascii.write(
-        table = fluxp_flat.to_table(sed_type = "e2dnde"),
-        output = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_fluxp.ecsv",
+        table = tab_uconv("MeV", fluxp_flat.to_table(sed_type = "e2dnde")),
+        output = dir_gout.joinpath("flat_fluxp.ecsv"),
         format = 'ecsv', overwrite = True,)
     # Save flux points as fits as well
     fluxp_flat.write(filename = dir_gout.joinpath("flat_fluxp.fits"), sed_type = "e2dnde", 
@@ -309,7 +309,7 @@ if __name__ == "__main__":
     # GENERATE PLOTS #
     # ============== #
 
-    log.info(f"Saving final plots to {dir_pout}")
+    log.info(f"Saving final plots...")
     # Generate SED plot
     plot_sed_gammapy(target = target, bblock = args.bblock, inst = "flat")
     # Generate SED plot comparison between FermiPy and GammaPy

@@ -20,9 +20,11 @@ from    gammapy.modeling.models     import  Models, SpectralModel, SkyModel
 from    gammapy.datasets            import  Datasets, FluxPointsDataset
 from    gammapy.estimators          import  FluxPointsEstimator
 
-from    models                      import  SmoothBrokenSpectralModel
-from    utils                       import  get_source_info, get_edec, get_etau, init_log, parse_kwargs
-from    plots                       import  plot_sed_gammapy
+from    alpsup.models   import  SmoothBrokenSpectralModel, EBLTableSpectralModel, UpturnSpectralModel, CompositeSpectralModel
+from    alpsup.utils    import  get_source_info, get_edec, get_etau, parse_kwargs
+from    alpsup.plots    import  plot_sed_gammapy
+from    alpsup.paths    import  get_results_dir
+from    alpsup.logs     import  init_log
 
 
 def is_converged(params):
@@ -43,7 +45,8 @@ def is_converged(params):
     return True, "Converged"
 
 
-def plot_cstatgrid(target, bblock, dataset, which, rcolors = True, cmap = "viridis", plot_best = False):
+def plot_cstatgrid(target: str, bblock: str, ebl: str,
+                   dataset: str, which: str, rcolors: bool = True, cmap: str = "viridis", plot_best: bool = False):
 
     # NOTE: Other nice looking colormaps: OrRd + White, Viridis_r + Black
 
@@ -57,8 +60,10 @@ def plot_cstatgrid(target, bblock, dataset, which, rcolors = True, cmap = "virid
         # ptitle = r'{} $\Delta$C-stat Surface'.format(target)
         ptitle = r'{} Upturn Grid'.format(target)
         pcblab = r'$\Delta$C-statistic'
+
     # Load data file
-    data = np.load(file = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/" + fname)
+    data = np.load(file = get_results_dir(target, bblock, ebl, output = "gamma-out").joinpath(fname))
+    
     # Select corresponding values
     ibreak_grid = data['X']
     ebreak_grid = data['Y']
@@ -110,7 +115,9 @@ def plot_cstatgrid(target, bblock, dataset, which, rcolors = True, cmap = "virid
         "hess": r"H.E.S.S.",
         "hess_bias": r"H.E.S.S.", }
 
-    plt.title(label_dataset[dataset] + f"\nBlock {bblock.split("-")[0].split("block")[-1]}", loc = "left", x = 0.035, y = 0.875, bbox = dict(facecolor = 'white', edgecolor = 'gray', boxstyle = 'round', alpha = 0.75), fontsize = 10)
+    plt.title(label_dataset[dataset] + f"\nBlock {bblock.split("-")[0].split("block")[-1]}", 
+              loc = "left", x = 0.035, y = 0.875, fontsize = 10,
+              bbox = dict(facecolor = 'white', edgecolor = 'gray', boxstyle = 'round', alpha = 0.75))
 
     # Axis labels and formatting
     plt.xlabel(r'$\Delta \Gamma$')
@@ -125,16 +132,20 @@ def plot_cstatgrid(target, bblock, dataset, which, rcolors = True, cmap = "virid
     # Save plot
     if which == "dcstat" and plot_best:
         plt.legend()
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/" + fname.split(".")[0] + ".pdf", bbox_inches = "tight")
+    plt.savefig(get_results_dir(target, bblock, ebl, output = "plots").joinpath(fname.split(".")[0] + ".pdf"), 
+                bbox_inches = "tight", )
     plt.close()
 
     return
 
 
-def plot_bestfit(target, bblock, dataset):
+def plot_bestfit(target: str, bblock: str, ebl: str, dataset: str):
+
+    # Output gamma-out directory
+    dir_gout = get_results_dir(target, bblock, ebl, output = "gamma-out")
 
     # Load data file
-    data = np.load(file = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/upturns_cstat_{dataset}.npz")
+    data = np.load(dir_gout / f"upturns_cstat_{dataset}.npz")
 
     # Select corresponding values
     ibreak_grid = data['X']
@@ -152,7 +163,7 @@ def plot_bestfit(target, bblock, dataset):
     dcstat_min = dcstat_grid[idx]
 
     # Load best-fit intrinsic model for this block
-    model = Models.read(f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/{dataset}_models.yaml")[target]
+    model = Models.read(dir_gout / f"{dataset}_models.yaml")[target]
 
     # Add smooth break and plot the model
     model_upturn_spectral = model.spectral_model * SmoothBrokenSpectralModel(
@@ -161,8 +172,8 @@ def plot_bestfit(target, bblock, dataset):
     
     # Save this compound model
     model_upturn = SkyModel(name = f"{target} Upturn", spectral_model = model_upturn_spectral)
-    Models([model_upturn]).write(path = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/upturn_bestfit.yaml",
-                                 overwrite = True)
+    Models([model_upturn]).write(path = dir_gout / "upturn_bestfit.yaml",
+                                 overwrite = True, )
     
     # Define energy range
     if dataset == "joint" or dataset == "joint_bias":
@@ -182,7 +193,7 @@ def plot_bestfit(target, bblock, dataset):
     model.spectral_model.plot_error(energy_range, ax = ax, sed_type = "e2dnde", color = "tab:blue")
 
     # Plot non-upturned flux points
-    plot_sed_gammapy(target, bblock, inst = dataset, ax = ax,
+    plot_sed_gammapy(target, bblock, ebl, inst = dataset, ax = ax,
                      plot_model = False, plot_fluxp = True, 
                      color = "tab:blue", label = None,
                      save_plot = False)
@@ -192,7 +203,7 @@ def plot_bestfit(target, bblock, dataset):
     plt.legend()
     # Save plot
     plt.tight_layout()
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/upturn_bestfit.png", dpi = 300, bbox_inches = "tight")
+    plt.savefig(dir_gout / "upturn_bestfit.png", dpi = 300, bbox_inches = "tight")
     plt.close()
 
     return
@@ -232,17 +243,15 @@ if __name__ == "__main__":
     target_4FGL, target_position, target_redshift = get_source_info(target)
 
     if args.plots_only:
-        plot_cstatgrid(target, args.bblock, dataset = args.dataset, which = "cstat")
-        plot_cstatgrid(target, args.bblock, dataset = args.dataset, which = "dcstat")
-        plot_bestfit(target, args.bblock, dataset = args.dataset)
+        plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
+        plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "dcstat")
+        plot_bestfit(target, args.bblock, args.ebl, dataset = args.dataset)
         exit()
 
     log = init_log(target, fname = f"model_upturns_{args.dataset}.log", bblock = args.bblock)
 
-    # Define output directory for current block (TODO: Separate into subfolder?)
-    # dir_gout = Path( f"{os.environ['RESULTS']}/{target}/{args.bblock}/upturns/" )
-    dir_gout = Path( f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/" )
-    dir_pout = Path( f"{os.environ['RESULTS']}/{target}/{args.bblock}/plots/" )
+    # Define output directory
+    dir_gout = get_results_dir(target, args.bblock, args.ebl, output = "gamma-out")
 
     # Load dataset and best-fit intrinsic model (by default, take hess data, choice for joint)
     log.info("Loading datasets and models...")
@@ -423,7 +432,7 @@ if __name__ == "__main__":
              X = ibreak_grid, Y = ebreak_grid, Z = delta_cstat_grid)
 
     # Generate plots
-    log.info(f"Generating and saving plots to {dir_pout}")
-    plot_cstatgrid(target, args.bblock, dataset = args.dataset, which = "cstat")
-    plot_cstatgrid(target, args.bblock, dataset = args.dataset, which = "dcstat")
-    plot_bestfit(target, args.bblock, dataset = args.dataset)
+    log.info(f"Generating and saving plots...")
+    plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
+    plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "dcstat")
+    plot_bestfit(target, args.bblock, args.ebl, dataset = args.dataset)

@@ -1,3 +1,5 @@
+from    __future__              import  annotations
+
 import  os
 import  glob
 import  argparse
@@ -20,14 +22,40 @@ from    matplotlib.ticker           import  MaxNLocator
 from    gammapy.modeling.models     import  Models, PowerLawSpectralModel
 from    gammapy.estimators          import  FluxPoints
 
-from    alpsup.utils                       import  get_fpul, get_source_list, parse_kwargs
-from    alpsup.models                      import  BiasedCompoundSpectralModel
+from    alpsup.utils                import  get_fpul, get_source_list, parse_kwargs
+from    alpsup.models               import  BiasedCompoundSpectralModel
+from    alpsup.paths                import  get_results_dir
 
 
-def _get_results_path(*parts: str) -> Path:
-    """Construct path relative to RESULTS folder from environment variable,
-    including `parts` subfolders."""
-    return Path(os.environ['RESULTS']).joinpath(*parts)
+def default_plot_kwargs(inst = None, **kwargs):
+    """
+    Set default keyword arguments for all plotting functions
+    """
+    
+    kwargs.setdefault("markersize", 3)
+    kwargs.setdefault("capsize", 2)
+    kwargs.setdefault("capthick", 1)
+
+    if inst in {"hess", "hess_bias", "joint_hess", "joint_hess_bias"}:
+        kwargs.setdefault("label", "H.E.S.S.")
+        kwargs.setdefault("color", "crimson")
+        kwargs.setdefault("marker", "s")
+        kwargs.setdefault("ymin", 1e-16)
+        kwargs.setdefault("ymax", 1e-10)
+
+    elif inst in {"flat", "flat_bias", "joint_flat"}:
+        kwargs.setdefault("label", r"$\it{Fermi}$-LAT")
+        kwargs.setdefault("color", "navy")
+        kwargs.setdefault("marker", "o")
+        kwargs.setdefault("ymin", None)
+        kwargs.setdefault("ymax", None)
+
+    else:
+        kwargs.setdefault("label", "Flux Points")
+        kwargs.setdefault("color", "teal")
+        kwargs.setdefault("marker", ".")
+
+    return kwargs
 
 
 def plot_sed_fermipy(target: str, bblock: str = "baseline", 
@@ -38,7 +66,7 @@ def plot_sed_fermipy(target: str, bblock: str = "baseline",
 
     # Set default plot styling
     kwargs_plot.setdefault("label", "Fermi-LAT")
-    kwargs_plot.setdefault("color", "crimson")
+    kwargs_plot.setdefault("color", "teal")
     kwargs_plot.setdefault("marker", "o")
     kwargs_plot.setdefault("markersize", 3)
     kwargs_plot.setdefault("capsize", 2)
@@ -46,8 +74,9 @@ def plot_sed_fermipy(target: str, bblock: str = "baseline",
 
     # Load SED data from FITS file
     sed_file = glob.glob(
-        str(_get_results_path(target, bblock, "fermi-out", "final_sed_*.fits")) )[0]
-    
+        str( get_results_dir(target, bblock, ebl = None, output = "fermi-out").joinpath("final_sed_*.fits") )
+    )[0]
+
     # Define required values
     with fits.open(sed_file) as f:
         
@@ -110,54 +139,27 @@ def plot_sed_fermipy(target: str, bblock: str = "baseline",
         plt.ylabel(r"$\text{E}^2$ $d\text{N}/d\text{E}$ " + r"[{}]".format(f"{(energy**2 * dnde).unit:unicode}"))
         plt.title(f"{target} FermiPy Fermi-LAT SED")
         plt.legend()
-        plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/sed_fermipy_flat.pdf", bbox_inches = "tight")
+        plt.savefig(
+            get_results_dir(target, bblock, ebl = None, output = "plots").joinpath("sed_fermipy_flat.pdf"),
+              bbox_inches = "tight", )
 
     # Return axis object
     return ax
 
 
-def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] = None, ax: Optional[plt.Axes] = None,
+def plot_sed_gammapy(target: str, bblock: str = "baseline", ebl: str = None,
+                     inst: Optional[str] = None, ax: Optional[plt.Axes] = None,
                      plot_model: bool = True, plot_error: bool = True, plot_fluxp: bool = True,
                      model_ebounds: Tuple = None,
                      save_plot: bool = True, 
                      sed_type: str = "e2dnde", **kwargs_plot) -> plt.Axes:
-    
-    # Set default plot styling
-    kwargs_plot.setdefault("markersize", 3)
-    kwargs_plot.setdefault("capsize", 2)
-    kwargs_plot.setdefault("capthick", 1)
-    # Set default plot limits
-    if inst == "hess":
-        kwargs_plot.setdefault("ymin", 1e-16)
-        kwargs_plot.setdefault("ymax", 1e-10)
-    elif inst == "flat":
-        kwargs_plot.setdefault("ymin", None)
-        kwargs_plot.setdefault("ymax", None)
-    else:
-        kwargs_plot.setdefault("ymin", None)
-        kwargs_plot.setdefault("ymax", None)
+        
+    kwargs_plot = default_plot_kwargs(inst, **kwargs_plot)
 
-    # Set certain kwargs based on instrument
-    if inst in ["hess", "hess_bias", "joint_hess", "joint_hess_bias"]:
-        # kwargs_plot.setdefault("label", "H.E.S.S.")
-        # kwargs_plot.setdefault("color", "navy")
-        kwargs_plot.setdefault("label", "H.E.S.S.")
-        kwargs_plot.setdefault("color", "crimson")
-        kwargs_plot.setdefault("marker", "s")
-    elif inst in ["flat", "flat_bias", "joint_flat"]:
-        # kwargs_plot.setdefault("label", "Fermi-LAT")
-        # kwargs_plot.setdefault("color", "crimson")
-        kwargs_plot.setdefault("label", r"$\it{Fermi}$-LAT")
-        kwargs_plot.setdefault("color", "navy")
-        kwargs_plot.setdefault("marker", "o")
-    # Otherwise, use default kwargs
-    else:
-        kwargs_plot.setdefault("label", "Flux Points")
-        kwargs_plot.setdefault("color", "teal")
-        kwargs_plot.setdefault("marker", ".")
+    # Load model data
+    base_path = get_results_dir(target, bblock, ebl, output = "gamma-out")
 
     # Load data
-    base_path = _get_results_path(target, bblock, "gamma-out")
     # Define name of models file
     if inst in ["joint_flat", "joint_hess"]:
         models_file = base_path / "joint_models.yaml"
@@ -169,12 +171,12 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] 
 
     # Define instruments
     instruments = {
-        "joint": ["hess", "flat"],
+        "joint": ["joint_hess", "joint_flat"],
         "joint_bias": ["hess_bias", "flat"],
         # "hess": "hess",
-        "joint_hess": ["hess"],
+        "joint_hess": ["joint_hess"],
         # "flat": "flat",
-        "joint_flat": ["flat"],
+        "joint_flat": ["joint_flat"],
         # "hess_bias": "hess_bias", 
     }.get(inst, [inst])
 
@@ -196,13 +198,16 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] 
             'yerrp': fluxp['e2dnde_errp'].quantity,
             'ts': fluxp['ts'], 
             'ebounds': [ np.min(fluxp['e_min']), np.max(fluxp['e_max']) ] * fluxp['e_ref'].unit, }
-        
+
         # Set up axes if not present
         if ax is None:
             fig, ax = plt.subplots()
             # Make sure correct units on axes
             ax.xaxis.set_units(fp_data['eref'].unit)
             ax.yaxis.set_units(fp_data[sed_type].unit)
+            # Ensure correct units for e2dnde sed
+            # if sed_type == "e2dnde":
+            #     ax.yaxis.set_units(fp_data[sed_type].to("TeV s-1 cm-2").unit)
         # Set logarithmic scale
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -231,7 +236,7 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] 
                 markersize = kwargs_plot["markersize"],
                 capsize = kwargs_plot["capsize"],
                 capthick = kwargs_plot["capthick"], )
-        
+
     # Plot model if requested (true by default)
     if plot_model:
         # Set energy bounds
@@ -257,10 +262,6 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] 
                 zorder = 1,
                 facecolor = kwargs_plot["color"] if kwargs_plot.get("color_model", None) == None else kwargs_plot["color_model"], )
 
-    # For Fermi-LAT only plot, set x-axis range
-    # if inst == "flat":
-    #     ax.set_xlim(ebounds[0].value - 150, ebounds[-1].value + 150)
-
     # Save plots
     if save_plot:
         plt.xlabel(r"Energy [{}]".format(f"{eref.unit:unicode}"))
@@ -268,11 +269,15 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", inst: Optional[str] 
             plt.ylabel(r"$\text{E}^2$ $d\text{N}/d\text{E}$ " + r"[{}]".format(f"{e2dnde_val.unit:unicode}"))
         if sed_type == "dnde":
             plt.ylabel(r"$d\text{N}/d\text{E}$ " + r"[{}]".format(f"{e2dnde_val.unit:unicode}"))
+        # Set xaxis limits based on flux model energy bounds
+        # plt.xlim(ebounds[0], ebounds[1])
         # Set yaxis limits
         plt.ylim(kwargs_plot["ymin"], kwargs_plot["ymax"])
+        # Set title
         plt.title(f"{target} GammaPy SED")
         plt.legend()
-        plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/sed_gammapy_{inst}.pdf", bbox_inches = "tight")
+        plt.savefig( get_results_dir(target, bblock, ebl, "plots").joinpath(f"sed_gammapy_{inst}.pdf") ,
+                     bbox_inches = "tight", )
 
     return ax
 
@@ -285,7 +290,7 @@ def plot_sed_compare(target: str, bblock: str = "baseline") -> None:
     # Plot FermiPy Fermi-LAT SED
     ax = plot_sed_fermipy(target, bblock, save_plot = False, label = "FermiPy", color = "teal")
     # Plot GammaPy Fermi-LAT SED
-    plot_sed_gammapy(target, bblock, "flat", ax = ax, save_plot = False, label = "GammaPy", color = "navy")
+    plot_sed_gammapy(target, bblock, inst = "flat", ax = ax, save_plot = False, label = "GammaPy", color = "navy")
 
     # Set titles and labels
     ax.set_xlabel("Energy [MeV]")
@@ -293,14 +298,14 @@ def plot_sed_compare(target: str, bblock: str = "baseline") -> None:
     ax.set_title(f"{target} Fermi-LAT SED Comparison")
     # Save plot
     plt.legend()
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/sed_gammapy_compare_flat.pdf", bbox_inches = "tight")
-    # Save also png copy
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/{target.lower()}_sed_gammapy_compare_flat.png", bbox_inches = "tight", dpi = 300)
+    plt.savefig(
+        get_results_dir(target, bblock, ebl = None, output = "plots").joinpath("sed_gammapy_compare_flat.pdf"), 
+        bbox_inches = "tight")
 
     return
 
 
-def plot_sed_combine(target: str, bblock: str = "baseline") -> None:
+def plot_sed_combine(target: str, bblock: str = "baseline", ebl: str | None = "dominguez") -> None:
     """
     Plot combined (individual) Fermi-LAT + H.E.S.S. SED fits from GammaPy
     """
@@ -315,13 +320,13 @@ def plot_sed_combine(target: str, bblock: str = "baseline") -> None:
 
     # First, plot models for Fermi-LAT and HESS
     plot_sed_gammapy(target = target, bblock = bblock, inst = "flat", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False)
-    plot_sed_gammapy(target = target, bblock = bblock, inst = "hess", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False)
+    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "hess", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False)
 
     # Next, plot flux points
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
     plot_sed_gammapy(target = target, bblock = bblock, inst = "flat", ax = ax, plot_model = False, plot_fluxp = True, save_plot = False)
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
-    plot_sed_gammapy(target = target, bblock = bblock, inst = "hess", ax = ax, plot_model = False, plot_fluxp = True, save_plot = False)
+    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "hess", ax = ax, plot_model = False, plot_fluxp = True, save_plot = False)
 
     # Set titles and labels
     plt.title("{} Combined SED".format(target))
@@ -329,12 +334,13 @@ def plot_sed_combine(target: str, bblock: str = "baseline") -> None:
     plt.ylabel(r"$\text{E}^2 d\text{N}/d\text{E}$ [TeV cm$^{-2}$ s$^{-1}$]")
     # Save plot
     plt.legend()
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/sed_gammapy_combined.pdf", bbox_inches = "tight")
+    plt.savefig(get_results_dir(target, bblock, ebl, output = "plots") / "sed_gammapy_combined.pdf",
+                bbox_inches = "tight")
 
     return
 
 
-def plot_sed_joint(target: str, bblock: str = "baseline", save_plot = True, ax = None, bias = False, **kwargs) -> None:
+def plot_sed_joint(target: str, bblock: str = "baseline", ebl: str | None = "dominguez", save_plot = True, ax = None, bias = False, **kwargs) -> None:
     """
     Plot joint Fermi-LAT + H.E.S.S. SED fit
     """
@@ -352,17 +358,12 @@ def plot_sed_joint(target: str, bblock: str = "baseline", save_plot = True, ax =
     ax.xaxis.set_units(u.Unit("TeV"))
     ax.yaxis.set_units(u.Unit("TeV / (s cm2)"))
 
-    # Get energy range from flux points of each instrument
-    emin = ascii.read(f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/joint_flat_fluxp.ecsv")['e_min'].quantity[0]
-    emax = ascii.read(f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/joint_hess_fluxp.ecsv")['e_max'].quantity[-1]
-
     # Plot joint model
-    plot_sed_gammapy(target = target, bblock = bblock, inst = "joint", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False, 
-                     model_ebounds = [emin, emax], color = "black")
+    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False, color = "black")
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
-    plot_sed_gammapy(target = target, bblock = bblock, inst = "joint_flat", ax = ax, plot_model= False, save_plot = False)
+    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_flat", ax = ax, plot_model= False, save_plot = False)
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
-    plot_sed_gammapy(target = target, bblock = bblock, inst = "joint_hess", ax = ax, plot_model = False, save_plot = False)
+    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_hess", ax = ax, plot_model = False, save_plot = False)
 
     # Save plot
     if save_plot == True:
@@ -370,7 +371,8 @@ def plot_sed_joint(target: str, bblock: str = "baseline", save_plot = True, ax =
         plt.xlabel("Energy [TeV]")
         plt.ylabel(r"$\text{E}^2 d\text{N}/d\text{E}$ [TeV cm$^{-2}$ s$^{-1}$]")
         plt.legend()
-        plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/sed_gammapy_joint.pdf", bbox_inches = "tight")
+        plt.savefig(get_results_dir(target, bblock, ebl, output = "plots") / "sed_gammapy_joint.pdf",
+                    bbox_inches = "tight")
         return
     # Otherwise return axis
     else:
@@ -599,15 +601,92 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
     Plot light curve including flux and spectral index evolution over time.
     """
 
+    # Define colors
+    kwargs.setdefault("color_flux", "crimson")
+    kwargs.setdefault("color_flux_err", "tomato")
+    kwargs.setdefault("color_flux_bb", "black")
+    kwargs.setdefault("color_index", "navy")
+    kwargs.setdefault("color_index_err", "royalblue")
+    kwargs.setdefault("color_index_bb", "black")
+    kwargs.setdefault("alpha_uplims", 0.15)
+
+    # Define output directory
+    dir_gout = get_results_dir(target, bblock, output = "gamma-out")
+
     # Load flux point table
     lc_table = ascii.read(
-        table = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/lc_flux_tab.ecsv", )
+        table = dir_gout / "lc_flux_tab.ecsv", )
     # Load flux Bayesian block table
     lc_flux_bblock_table = ascii.read(
-        table = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/lc_flux_bblock_tab.ecsv", )
+        table = dir_gout / "lc_flux_bblock_tab.ecsv", )
     # Load index Bayesian block table
     lc_index_bblock_table = ascii.read(
-        table = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/lc_index_bblock_tab.ecsv", )
+        table = dir_gout / "lc_index_bblock_tab.ecsv", )
+
+    # Auxiliary function for computing average flux of Bayesian block
+    def get_bblock_avg(lc_table, lc_bblock_table, val: str, mask_notul):
+
+        block_times = []
+        block_vals = []
+        # block_errors = []
+        mean_vals = []
+
+        for block in lc_bblock_table:
+
+            # Get time values for bblock
+            if val == "index":
+                # TODO: Ensure saved as plain values to simplify this
+                tmin = block["time_min"].value
+                tmax = block["time_max"].value  
+            else:
+                tmin = block["time_min"]
+                tmax = block["time_max"]
+
+            # Points belonging to this block
+            mask = (
+                (lc_table["time_ref"] >= tmin) &
+                (lc_table["time_ref"] < tmax) &
+                mask_notul )
+
+            if np.sum(mask) == 0:
+                mean_vals.append(np.nan)
+                continue
+
+            if val == "index":
+                # Get index error
+                sigma = lc_table[f"{val}_err"][mask] 
+            else:
+                # Consider average error from asymmetric uncertainties
+                # TODO: Check if this is the best approach
+                sigma = 0.5 * (
+                    lc_table[f"{val}_errn"][mask] +
+                    lc_table[f"{val}_errp"][mask] )
+            
+            # Compute weights considering error values
+            weights = 1.0 / sigma**2
+            print("weight!")
+            print(weights)
+            # Compute weighted average of value
+            mean_val = np.nansum(weights * lc_table[val][mask]) / np.nansum(weights)
+            print("vals")
+            print(lc_table[val][mask])
+            print("mea")
+            print(mean_val)
+
+            # NOTE: Altenratively, simple arithmetic mean
+            # mean_val = np.nanmean(lc_table[val][mask])
+
+            # Standard error on the mean
+            # err = np.std( lc_table[val][mask], ddof = 1 ) / np.sqrt( np.sum(mask) )
+            
+            # Append results to arrays
+            mean_vals.append(mean_val)
+            block_times.append((tmin + tmax) / 2)
+            block_vals.append(mean_val)
+            # block_errors.append(err)
+
+        return mean_vals
+
 
     # Define figure
     fig, ax = plt.subplots(nrows = 2, ncols = 1, height_ratios = (2, 1), sharex = True)
@@ -635,7 +714,7 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         y = lc_table["dnde"][mask_notul].value.squeeze(),
         xerr = [lc_table["time_ref"][mask_notul] - lc_table["time_min"][mask_notul], lc_table["time_max"][mask_notul] - lc_table["time_ref"][mask_notul]],
         yerr = [lc_table["dnde_errn"][mask_notul].value.squeeze(), lc_table["dnde_errp"][mask_notul].value.squeeze()],
-        linestyle = "", marker = ".", color = "crimson",
+        linestyle = "", marker = ".", color = kwargs["color_flux"],
         capsize = 2, zorder = 4, )
     # Plot flux points - UL
     ax[0].errorbar(
@@ -646,25 +725,43 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         linestyle = "",
         marker = "v",
         capsize = 0,
-        alpha = 0.25,
-        color = "tomato",
+        alpha = kwargs["alpha_uplims"],
+        color = kwargs["color_flux_err"],
         zorder = 3, )
     
-    # Plot Bayesian block values for flux points as horizontal lines
-    ax[0].hlines(
+    # Plot Bayesian block values for flux points as horizontal lines (from reconstructed light curve)
+    '''ax[0].hlines(
         y = lc_flux_bblock_table["dnde"],
         xmin = lc_flux_bblock_table["time_min"],
         xmax = lc_flux_bblock_table["time_max"],
-        color = "black",
+        color = "brown",
         linestyle = "-.",
         linewidth = 1,
         alpha = 1,
+        zorder = 5, )'''
+
+    # Plot Bayesian block values for flux points as horizontal lines (average on flux points)   
+    mean_fluxes = get_bblock_avg(lc_table, lc_flux_bblock_table, val = "dnde", mask_notul = mask_notul)
+
+    ax[0].hlines(
+        y = mean_fluxes,
+        xmin = lc_flux_bblock_table["time_min"],
+        xmax = lc_flux_bblock_table["time_max"],
+        color = kwargs["color_flux_bb"],
+        linestyle = "-.",
+        linewidth = 1,
         zorder = 5, )
     
     # NOTE: Set errors to be 0.2 * value on index upper limits
     for k, row in enumerate(lc_table["index"]):
         if lc_table["index_is_ul"][k] == True:
             lc_table["index_err"][k] = 0 * lc_table["index"][k]
+
+    # NOTE: Filter rows of each table to ensure no saturated points included
+    for k, row in enumerate(lc_table):
+        if np.abs(row["index"] - 6.5) < 0.5 or np.abs(row["index"] - 0) < 0.5:
+            lc_table[k]["index"] = np.nan
+            lc_table[k]["index_err"] = np.nan
 
     # Plot index values for each flux point
     ax[1].errorbar(
@@ -676,7 +773,7 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         linestyle = "", 
         capsize = 2,
         zorder = 4, 
-        color = "navy", )
+        color = kwargs["color_index"], )
     # Plot index values for each flux point - UPLIMS
     ax[1].errorbar(
         x = lc_table["time_ref"][mask_ul].value.squeeze(),
@@ -685,40 +782,51 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         yerr = lc_table["index_err"][mask_ul].value.squeeze(),
         marker = "v",
         linestyle = "", 
-        alpha = 0.25,
+        alpha = kwargs["alpha_uplims"],
         capsize = 0,
         zorder = 3,
-        color = "royalblue", )
-        # uplims = lc_table["index_is_ul"].squeeze())
+        color = kwargs["color_index_err"], )
     
-    # Plot Bayesian block values for index flux points as horizontal lines
-    ax[1].hlines(
+    # Plot Bayesian block values for index flux points as horizontal lines (from reconstructed light curve)
+    '''ax[1].hlines(
         y = lc_index_bblock_table["index"].value.squeeze(),
         xmin = lc_index_bblock_table["time_min"].value.squeeze(),
         xmax = lc_index_bblock_table["time_max"].value.squeeze(),
-        color = "black",
+        color = "brown",
         linestyle = "-.",
         linewidth = 1,
         alpha = 1,
+        zorder = 5, )'''
+    
+    # Plot Bayesian block values for index points as horizontal lines (average on light curve)   
+    mean_indices = get_bblock_avg(lc_table, lc_index_bblock_table, val = "index", mask_notul = mask_notul)
+
+    ax[1].hlines(
+        y = mean_indices,
+        xmin = lc_flux_bblock_table["time_min"],
+        xmax = lc_flux_bblock_table["time_max"],
+        color = kwargs["color_index_bb"],
+        linestyle = "-.",
+        linewidth = 1,
         zorder = 5, )
     
     # Ensure x-axis integer ticks
-    ax[0].set_xticklabels(ax[0].get_xticks().astype(int))
+    # ax[0].set_xticklabels(ax[0].get_xticks().astype(int))
     
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/lightcurve_hess.pdf", bbox_inches = "tight")
+    plt.savefig( get_results_dir(target, bblock, output = "plots") / f"lightcurve_hess.pdf", bbox_inches = "tight")
     plt.close()
 
     return
 
 
-def plot_ellipses(target: str, bblock: str = "baseline", print_labels: bool = False, **kwargs) -> None:
+def plot_ellipses(target: str, bblock: str = "baseline", ebl: str = "dominguez", print_labels: bool = False, **kwargs) -> None:
     """
     Plot best-fit index versus amplitude / normalization ellipses
     """
 
     # Load Bayesian block table
     lc_bblock_table = ascii.read(
-        table = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/lc_flux_bblock_tab.ecsv", )
+        table = get_results_dir(target, bblock, output = "gamma-out") / "lc_flux_bblock_tab.ecsv", )
     # Extract Bayesian block edges for flux
     bblocks_edges_flux = [lc_bblock_table["time_min"][0]]
     bblocks_edges_flux.extend(lc_bblock_table["time_max"])
@@ -726,7 +834,7 @@ def plot_ellipses(target: str, bblock: str = "baseline", print_labels: bool = Fa
     fit_times_bb_flux = [Time(val = list(p), format = "mjd") for p in zip(bblocks_edges_flux, bblocks_edges_flux[1:])]
 
     # Load the covariance matrix of each block
-    cov_bblock = np.load(file = f"{os.environ['RESULTS']}/{target}/{bblock}/gamma-out/lc_flux_bblock_cov.npy")
+    cov_bblock = np.load(file = get_results_dir(target, bblock, output = "gamma-out") / "lc_flux_bblock_cov.npy")
     # Compute best-fit ellipses (axes swapped, so x -> norm, y -> index)
     fig, ax = plt.subplots()
 
@@ -822,7 +930,7 @@ def plot_ellipses(target: str, bblock: str = "baseline", print_labels: bool = Fa
         ax.legend(loc = kwargs["loc"], fontsize = kwargs.get("fontsize", None), ncols = kwargs.get("ncols", 1))
     # ax.legend( loc = 'upper center', bbox_to_anchor = (0.5, -0.15) ) # Bottom center
     # Save figure
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{bblock}/plots/lightcurve_hess_ellipses.pdf", bbox_inches = "tight")
+    plt.savefig(get_results_dir(target, bblock, output = "plots") / "lightcurve_hess_ellipses.pdf", bbox_inches = "tight")
     plt.close()
 
     return
@@ -838,6 +946,8 @@ if __name__ == "__main__":
     parser.add_argument("--bblock", default = "baseline", 
                     help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs)")
     
+    parser.add_argument("--ebl", default = "dominguez", help = "EBL absorption model to use (loaded from EBLTable)")
+
     parser.add_argument("--plot", default = None, choices = ["xcheck", "lightcurve", "sed", "sed_bias", "sed_compare"], help = "Which plots to generate")
 
     parser.add_argument("--inst", choices = ["hess", "hess_bias", "fermi", "flat", "joint", "joint_bias"])
@@ -865,7 +975,7 @@ if __name__ == "__main__":
     # Plot GammaPy SED
     if args.plot == "sed":
         if args.inst != "joint":
-            plot_sed_gammapy(target, args.bblock, args.inst, save_plot = True)
+            plot_sed_gammapy(target, args.bblock, ebl = args.ebl, inst = args.inst, save_plot = True)
         elif args.inst == "joint":
             plot_sed_joint(target, args.bblock)
     # Plot GammaPy HESS bias (+ Fermi-LAT) systematic errors

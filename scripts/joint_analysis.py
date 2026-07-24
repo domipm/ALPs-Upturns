@@ -21,9 +21,11 @@ from    gammapy.modeling.models     import  Models, SkyModel, SpectralModel, Poi
 from    gammapy.datasets            import  Datasets, SpectrumDatasetOnOff
 from    gammapy.estimators          import  FluxPointsEstimator
 
-from    utils                       import  get_source_info, par_uconv, tab_uconv, parse_kwargs, get_edec, init_log
-from    plots                       import  plot_sed_combine, plot_sed_joint
-from    models                      import  BiasedPriorSpectrumDatasetOnOff, BiasedCompoundSpectralModel
+from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff, CompositeSpectralModel, EBLTableSpectralModel
+from    alpsup.utils                import  get_source_info, par_uconv, tab_uconv, parse_kwargs, get_edec
+from    alpsup.logs                 import  init_log
+from    alpsup.plots                import  plot_sed_combine, plot_sed_joint
+from    alpsup.paths                import  get_results_dir
 
 
 if __name__ == "__main__":
@@ -57,9 +59,8 @@ if __name__ == "__main__":
         exit()
 
     # Define output directories - they must exist by now!
-    # TODO: Use these rather than paths!
-    dir_gout = Path( f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/" )
-    dir_pout = Path( f"{os.environ['RESULTS']}/{target}/{args.bblock}/plots/" )
+    dir_gout = get_results_dir(target, args.bblock, args.ebl, output = "gamma-out")
+    dir_fout = get_results_dir(target, args.bblock, output = "gamma-out")
 
     # Get info of source
     target_4FGL, target_position, target_redshift = get_source_info(target)
@@ -79,8 +80,8 @@ if __name__ == "__main__":
 
     # Load Fermi-LAT datasets object containing models
     dataset_flat = Datasets.read(
-        filename = "{}/{}/{}/gamma-out/flat_datasets.yaml".format(os.environ['RESULTS'], target, args.bblock),
-        filename_models = "{}/{}/{}/gamma-out/flat_models.yaml".format(os.environ['RESULTS'], target, args.bblock), )[0]
+        filename = f"{dir_fout}/flat_datasets.yaml",
+        filename_models = f"{dir_fout}/flat_models.yaml", )[0]
     # Remove the target source from the dataset (we define it later based on HESS model including EBL)
     dataset_flat.models = [model for model in dataset_flat.models if model.name != target]
     # Freeze all parameters of all background models
@@ -88,7 +89,7 @@ if __name__ == "__main__":
 
     # If background model found, change filename path for serialization
     if "Models Background" in dataset_flat.models.names:
-        dataset_flat.models["Models Background"].spatial_model.filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/flat_models_background.fits"
+        dataset_flat.models["Models Background"].spatial_model.filename = f"{dir_fout}/flat_models_background.fits"
 
     # Append Fermi-LAT models (without target) to global models object
     for model in dataset_flat.models:
@@ -101,8 +102,8 @@ if __name__ == "__main__":
 
     # Load HESS datasets object containing target model
     dataset_hess = Datasets.read(
-        filename = "{}/{}/{}/gamma-out/hess_datasets.yaml".format(os.environ['RESULTS'], target, args.bblock),
-        filename_models = "{}/{}/{}/gamma-out/hess_models.yaml".format(os.environ['RESULTS'], target, args.bblock), )[0]
+        filename = f"{dir_gout}/hess_datasets.yaml",
+        filename_models = f"{dir_gout}/hess_models.yaml", )[0]
     # Extract HESS models
     models_hess = dataset_hess.models
 
@@ -182,8 +183,8 @@ if __name__ == "__main__":
 
     # Save final datasets and models
     dataset_joint.write(
-        filename = "{}/{}/{}/gamma-out/joint_datasets.yaml".format(os.environ['RESULTS'], target, args.bblock),
-        filename_models = "{}/{}/{}/gamma-out/joint_models.yaml".format(os.environ['RESULTS'], target, args.bblock),
+        filename = f"{dir_gout}/joint_datasets.yaml",
+        filename_models = f"{dir_gout}/joint_models.yaml",
         overwrite = True, )
     # Save fit results
     results_joint.write(
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     # Save flux points table as csv file
     ascii.write(
         table = fluxp_joint_flat_tab_conv,
-        output = "{}/{}/{}/gamma-out/joint_flat_fluxp.ecsv".format(os.environ['RESULTS'], target, args.bblock),
+        output = f"{dir_gout}/joint_flat_fluxp.ecsv",
         format = 'ecsv',
         overwrite = True,)
     
@@ -227,7 +228,7 @@ if __name__ == "__main__":
     # Save flux points table as csv file
     ascii.write(
         table = fluxp_joint_hess_tab_conv,
-        output = "{}/{}/{}/gamma-out/joint_hess_fluxp.ecsv".format(os.environ['RESULTS'], target, args.bblock),
+        output = f"{dir_gout}/joint_hess_fluxp.ecsv",
         format = 'ecsv',
         overwrite = True,)
     
@@ -247,11 +248,17 @@ if __name__ == "__main__":
     dataset_flat_bias = dataset_flat.copy(name = "Fermi-LAT")
 
     # Create new biased version of target model for HESS
-    spectral_model_hess = BiasedCompoundSpectralModel(
+    spectral_model_hess = CompositeSpectralModel(
+        # Intrinsic spectral model
         intrinsic_model = dataset_hess.models[target].spectral_model.model1,
-        ebl_model = dataset_hess.models[target].spectral_model.model2,
+        # EBL model
+        ebl_model = EBLTableSpectralModel.read_ebl(
+            energy = np.logspace(-3, 1.5, 200) * u.TeV, ebl_name = args.ebl, redshift = target_redshift),
+        # Don't include upturn model
+        upturn_model = None,
+        # Bias parameter initial value
         bias = 0.0, )
-    
+
     # Define sky model for hess spectral model
     ps_model_hess = SkyModel(
         datasets_names = "HESS",
@@ -280,7 +287,7 @@ if __name__ == "__main__":
         # Same spatial model
         spatial_model = target_model_bias.spatial_model,
         # Spectral model being the intrinsic and ebl without bias
-        spectral_model = target_model_bias.spectral_model._intrinsic_model * target_model_bias.spectral_model._ebl_model, )
+        spectral_model = target_model_bias.spectral_model.intrinsic_model * target_model_bias.spectral_model.ebl_model, )
 
     # Add original Fermi-LAT models and to list
     models_flat = Models(models_flat)
@@ -310,13 +317,13 @@ if __name__ == "__main__":
 
     # Save final results
     results_joint_bias.write(
-        path = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/joint_bias_fit.yaml",
+        path = f"{dir_gout}/joint_bias_fit.yaml",
         overwrite_templates = True,
         overwrite = True, )
     # Save final datasets and model
     datasets_joint_bias.write(
-        filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/joint_bias_datasets.yaml",
-        filename_models = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/joint_bias_models.yaml",
+        filename = f"{dir_gout}/joint_bias_datasets.yaml",
+        filename_models = f"{dir_gout}/joint_bias_models.yaml",
         overwrite = True, )
     
     # ============== #

@@ -21,17 +21,19 @@ from    gammapy.modeling            import  Fit, FitResult, OptimizeResult, Cova
 from    gammapy.modeling.models     import  PowerLawSpectralModel, SkyModel
 from    gammapy.maps                import  MapAxis
 
-from    alpsup.utils                import  parse_kwargs, get_source_info, get_source_list, init_log, gen_dirs, get_edec, is_converged
+from    alpsup.utils                import  parse_kwargs, get_source_info, get_source_list, get_edec, is_converged
 from    alpsup.plots                import  plot_ellipses, plot_lightcurve
-from    alpsup.paths                import  get_hess_data_dir
+from    alpsup.paths                import  gen_dirs, get_results_dir
+from    alpsup.datasets             import  get_hess_dataset, ATOL
+from    alpsup.logs                 import  init_log
 
 
-# Define tolerance for time selection (~ 20 mins / avg HESS run)
-ATOL = 0.015 * u.d
-
-
-def get_ethresh(datasets):
-    """Compute threshold energy for all datasets"""
+def get_ethresh(datasets: Datasets):
+    """
+    Compute threshold energy for all datasets, including minimum, maximum, and average energies
+    Args:
+        datasets (gammapy.datasets.Datasets): per-observation datasets.
+    """
 
     # Get threshold energy for stacked dataset
     emin_stack, emax_stack = datasets.stack_reduce().energy_range_total
@@ -50,7 +52,13 @@ def get_ethresh(datasets):
     return emin, emax, emin_avg
 
 
-def gen_tintervals(datasets, method = "night_times", **kwargs):
+def gen_tintervals(datasets: Datasets, method: str = "night_times", **kwargs):
+    """
+    Generate time intervals considering good-time intervals for all observational datasets, using different methods.
+    Args:
+        datasets (gammapy.datasets.Datasets): per-observation datasets.
+        method (str): method to use for generating time intervals
+    """
 
     # Get GTIs from datasets
     gti_starts = np.array( sorted( [ds.gti.time_start.mjd[0] for ds in datasets]) )
@@ -193,19 +201,21 @@ if __name__ == "__main__":
     # ========================= #
 
     # Arguments for script
-    parser = argparse.ArgumentParser(description = "Run Fermi-LAT analysis for a source using FermiPy")
+    parser = argparse.ArgumentParser(description = "Run Fermi-LAT analysis for a source using FermiPy", formatter_class = argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--source", required = True, choices = get_source_list(), help = "Source name")
 
     parser.add_argument("--dataset", default = "HAP-HD", help = "Which dataset to use (HAP-HD, HAP-FR, HAP-FITS)")
-    parser.add_argument("--config", default = "std_ImPACT_fullEnclosure_updated", help = "Which reconstruction configuration to use (default: std_ImPACT_fullEnclosure)")
+    parser.add_argument("--config", default = "std_ImPACT_hybrid_fullEnclosure_updated", help = "Which reconstruction configuration to use")
 
     parser.add_argument("--bblock", default = "baseline", 
                     help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs)")
 
-    parser.add_argument("--binning", default = "night_times", choices = ["night_times", "night_bins", "obs_times"], help = "Which time-binning to use. Default: nightly binning from GTI times")
+    parser.add_argument("--binning", default = "night_times", choices = ["night_times", "night_bins", "obs_times"], help = "Which time-binning to use.")
+
+    parser.add_argument("--recon-lc", action = "store_true", help = "Reconstruct light curve instead of computing average value.")
 
     parser.add_argument("--plots-only", action = "store_true", help = "Run only generation of plots from files")
-    parser.add_argument("--annotate", action = "store_true", help = "Annotate ellipses for identification. Default: False")
+    parser.add_argument("--annotate", action = "store_true", help = "Annotate ellipses for identification.")
     parser.add_argument("--kwargs", nargs = '*', help = "Additional keyword arguments ('key=value')")
     args = parser.parse_args()
 
@@ -220,13 +230,8 @@ if __name__ == "__main__":
     # Get info of source
     target_4FGL, target_position, target_redshift = get_source_info(target)
 
-    # Generate and check directories
-    gen_dirs(target, bblock = args.bblock)
-
     # Define output directories
-    dir_base = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock or '')}/" )
-    dir_gout = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock or '')}/gamma-out/" )
-    dir_pout = Path( f"{os.environ["RESULTS"]}/{target}/{str(args.bblock or '')}/plots/" )
+    dir_gout = get_results_dir(target, args.bblock, ebl = None, output = "gamma-out")
 
     # Run plotting-only
     if args.plots_only:
@@ -243,36 +248,8 @@ if __name__ == "__main__":
 
     # Load per-observation datasets
     log.info(f"Loading HESS data from {args.dataset} dataset using {args.config} configuration...")
-    # Path to data directory
-    dir_data = get_hess_data_dir(target, args.dataset.lower(), args.config)
-    # Get all fits files
-    obs_rmfs  = list(dir_data.glob('*rmf.fits'))
-    obs_files = [ Path(str(x).replace("_rmf", "")) for x in obs_rmfs ]
-    if not obs_files:
-        raise FileNotFoundError(f"No observation files found in {dir_data}")
-    # Empty dataset object
-    dataset_obs = Datasets()
-    # Append each observation to datasets
-    for obs in obs_files:
-        dataset_obs.append(SpectrumDatasetOnOff.read(obs))
-    log.info(f"Loaded HESS data with {len(dataset_obs)} observations!")
-
-    # Perform time selection (if given)
-    dataset_obs = dataset_obs.select_time(
-        time_min = Time( [ kwargs.get('tmin', sorted(dataset_obs.gti.time_start)[0].mjd ) ], format = "mjd" ),
-        time_max = Time( [ kwargs.get('tmax', sorted(dataset_obs.gti.time_stop)[-1].mjd ) ], format = "mjd" ), )
-
-    # Run initial fit on stacked dataset
-    dataset = dataset_obs.stack_reduce()
-
-    # Define HESS energy axis
-    energy_axis_hess = MapAxis.from_energy_bounds(
-        energy_min = dataset.counts.geom.axes["energy"].bounds[0],
-        energy_max = dataset.counts.geom.axes["energy"].bounds[1],
-        unit = u.TeV, nbin = 4, per_decade = True, )
     
-    # Resample HESS energy axis for stacked dataset
-    dataset = dataset.resample_energy_axis(energy_axis_hess)
+    dataset_obs, dataset = get_hess_dataset(target, dataset = args.dataset, config = args.config)
 
     # Get Good Time Intervals (GTIs) and display total observation time
     log.info(f"GTI Info:")
@@ -425,7 +402,7 @@ if __name__ == "__main__":
 
     # Save initial light curve as fits file
     lc_flux.write(
-        filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/lc_flux.fits",
+        filename = dir_gout.joinpath("lc_flux.fits"),
         sed_type = "dnde", format = "lightcurve", overwrite = True, )
 
     # Generate light curve table - main results table
@@ -500,8 +477,11 @@ if __name__ == "__main__":
     lc_flux.plot(sed_type = "dnde", time_format = "mjd", axis_name = "time")
     # Plot reconstructed light curve
     lc_flux_bblock.plot(sed_type = "dnde", time_format = "mjd", axis_name = "time")
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/lc_flux_bb.png", dpi = 300, bbox_inches = "tight")
+    plt.savefig(
+        dir_gout.joinpath("lc_flux_bb.png"),
+        dpi = 300, bbox_inches = "tight")
     plt.close()
+
 
     # ====================================== #
     # RUN FIT FOR EACH FLUX POINT SEPARATELY #
@@ -576,6 +556,8 @@ if __name__ == "__main__":
     # Run time resolved spectroscopy for each Bayesian block on index values (gives index per Bayesian block value)
     lc_index_bblock_tab, lc_index_bblock_results = time_resolved_spectroscopy(dataset_obs, lc_index_bblock_tab, check_convergence = True)
 
+    # TODO: INSTEAD, COMPUTE AVERAGE
+
     # ============================================ #
     # SAVE LIGHT CURVE TO FILES AND GENERATE PLOTS #
     # ============================================ #
@@ -584,11 +566,11 @@ if __name__ == "__main__":
     # Save main light curve flux points and index values
     ascii.write(
         table = lc_flux_tab, overwrite = True, format = "ecsv",
-        output = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/lc_flux_tab.ecsv", )
+        output = dir_gout.joinpath("lc_flux_tab.ecsv"), )
     # Save Bayesian blocks on flux
     ascii.write(
         table = lc_flux_bblock_tab, overwrite = True, format = "ecsv",
-        output = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/lc_flux_bblock_tab.ecsv", )
+        output = dir_gout.joinpath("lc_flux_bblock_tab.ecsv"), )
     # Save bayesian blocked flux light curve table
     ascii.write(
         table = lc_flux_bblock_tab, format = "ecsv", overwrite = True,
@@ -596,13 +578,13 @@ if __name__ == "__main__":
     # Save Bayesian blocks on index
     ascii.write(
         table = lc_index_bblock_tab, overwrite = True, format = "ecsv",
-        output = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/lc_index_bblock_tab.ecsv", )
+        output = dir_gout.joinpath("lc_index_bblock_tab.ecsv"), )
 
     # ================================================================ #
     # PLOT FINAL LIGHT CURVE AND BEST-FIT ELLIPSES FOR BAYESIAN BLOCKS #
     # ================================================================ #
 
-    log.info(f"Saving plots to {dir_pout}")
+    log.info(f"Saving final plots...")
     plot_lightcurve(target, args.bblock)
     plot_ellipses(target, args.bblock, args.annotate, loc = kwargs.get("loc", "default"))
 

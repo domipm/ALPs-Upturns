@@ -3,21 +3,127 @@
 # Create the environment with: conda env create -f envs/env_fermi.yaml
 
 import  os
+import  yaml
 import  argparse
 
 import  numpy                   as      np
+import  matplotlib.pyplot       as      plt
 
 from    fermipy.gtanalysis      import  GTAnalysis
-
-from    fermi_utils             import  gen_config, plot_fermi_diagnostics
+from    fermipy.plotting        import  ROIPlotter
 
 from    alpsup.utils            import  parse_kwargs, get_source_info
 from    alpsup.plots            import  plot_sed_fermipy
-from    alpsup.paths            import  RESULTS_DIR, get_results_dir
+from    alpsup.paths            import  REPO_ROOT, RESULTS_DIR, FLAT_DATA_DIR, FERMIPY_DATA_DIR, get_results_dir
 
 
 # TODO: USE get_results_dir() INSTEAD OF RESULST_DIR!
-# TODO: ALSO, CHECK THAT EVERYTHING ACTUALLY WORKS!
+
+
+def gen_config(target, target_position, model = None, bblock = "baseline", **kwargs):
+    """
+    Generate fermi_config.yaml file for given target source with the relevant parameters.
+
+    Args:
+        target (str): Name of target source.
+        model (str): Model to override default 4FGL model. Choices: 'PowerLaw', 'LogParabola'. Default: None (use 4FGL catalog model or, if unavailable, PowerLaw).
+        **kwargs: Additional arguments to modify in the config file.
+    """
+
+    # Read default template config yaml file
+    with open(REPO_ROOT / "configs/fermi_config.yaml", 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Update the fields based on parameters (keep rest default)
+
+    # File IO - set correct output folders (absolute path)
+    config["fileio"]["outdir"] = str( RESULTS_DIR.resolve() / f"{target}/{bblock}/fermi-out/" )
+    config["fileio"]["logfile"] = str( RESULTS_DIR.resolve() / f"{target}/{bblock}/fermi-out/fermi.log" )
+
+    # Data - set correct events and spacecraft file paths
+    config["data"]["evfile"] = str( FLAT_DATA_DIR.resolve() / f"{target}/events_list.txt" )
+    # NOTE: Use single, global spacecraft file (make sure it covers full observational period)
+    # config["data"]["scfile"] = f"$FLAT_DATA/{target}/spacecraft.fits"
+    config["data"]["scfile"] = str( FLAT_DATA_DIR.resolve() / f"spacecraft.fits" )
+    # Selection - set correct position of the source
+    config["selection"]["ra"] = float( target_position.ra.value )
+    config["selection"]["dec"] = float( target_position.dec.value )
+
+    # FermiPy data directory
+    config["model"]["extdir"] = str( FERMIPY_DATA_DIR.resolve() )
+    config["model"]["isodiff"] = str( FERMIPY_DATA_DIR.resolve() / "iso_P8R3_SOURCE_V3_v1.txt" )
+
+    # If spectral model given, replace or add it
+    if model != None:
+        config["model"]["sources"] = [ {
+            "name": target,
+            "ra": float( target_position.ra.value ),
+            "dec": float( target_position.dec.value ),
+            "SpectrumType": model, } ]
+
+    # Go over each additional kwarg given and update its value (leave default otherwise)
+    for kkey, value in kwargs.items():
+        # Loop over all keys in the config file
+        for ckey in config:
+            # Check if kwarg key is there
+            if config[ckey].get(kkey) != None:
+                # Set the value of the key to the kwarg value given
+                config[ckey][kkey] = value
+
+    # Define and create output directory if doesn't exist
+    os.makedirs(name = RESULTS_DIR.resolve() / f"{target}/{bblock}/",
+                exist_ok = True)
+
+    # Save modified config template to directory
+    with open(RESULTS_DIR.resolve() / f"{target}/{bblock}/fermi_config.yaml", 'w') as f:
+        yaml.safe_dump(config, f, sort_keys = False, default_flow_style = False)
+
+    # Return the config dictionary with all the parameters used
+    return config
+
+
+def plot_fermi_diagnostics(gta, resid, tsmap, psmap, target, bblock = "baseline"):
+    """
+    Generate diagnostic plots for FermiPy analysis results.
+    """
+
+    # Counts, model counts, excess, and significance
+    fig = plt.figure(figsize = (14, 18))
+
+    # Plot the counts map
+    ROIPlotter(gta.counts_map(), roi = gta.roi).plot(subplot = 321, cmap = "magma", fraction = 0.046, pad = 0.04)
+    plt.gca().set_title("Counts")
+    # Plot the model counts map
+    ROIPlotter(gta.model_counts_map(), roi = gta.roi).plot(subplot = 322, cmap = "magma", fraction = 0.046, pad = 0.04)
+    plt.gca().set_title("Model Counts")
+    # Plot residual excess counts plot
+    ROIPlotter(resid['excess'], roi = gta.roi).plot(subplot = 323, cmap = 'RdBu_r', fraction = 0.046, pad = 0.04)
+    plt.gca().set_title('Excess Counts')
+    # Plot residual significance plot
+    ROIPlotter(resid['sigma'], roi = gta.roi).plot(levels = [-5, -3, 3, 5, 7, 9], subplot = 324, cmap = 'RdBu_r', fraction = 0.046, pad = 0.04)
+    plt.gca().set_title('Significance')
+    # Plot sqrt(TS) map
+    ROIPlotter(tsmap['sqrt_ts'], roi=gta.roi).plot(
+        # vmin = 0, vmax = 5.0,
+        subplot = 325, cmap = 'magma', fraction = 0.046, pad = 0.04,
+        levels = [1, 2, 3, 4, 5],
+        cb_label = r"$\sqrt{TS} \,\,[\sigma]$",)
+    plt.gca().set_title(r'$\sqrt{\text{TS}}$',)
+    # Plot PS sigma map
+    ROIPlotter(psmap["pssigma_map"], roi = gta.roi).plot(
+        # vmin = -5, vmax = 5,
+        subplot = 326, cmap = "RdBu_r", fraction = 0.046, pad = 0.04,
+        interpolation = "bicubic",
+        levels = [3, 4, 5],
+        cb_label = r"$\text{PS} \,\,[\sigma]$",)
+    plt.gca().set_title(r'$\text{PS}$')
+
+    # Save the plots
+    plt.tight_layout()
+    plt.savefig(RESULTS_DIR.resolve() / f"{target}/{bblock}/fermi-out/final_plots.png", dpi = 300, bbox_inches = "tight")
+    plt.close()
+
+    return
 
 
 if __name__ == "__main__":
@@ -134,7 +240,7 @@ if __name__ == "__main__":
     elif (args.analysis == "target-only"):
 
         # Load roi from file (baseline subfolder)
-        gta.load_roi(RESULTS_DIR / f"{target}/{kwargs.get('load-roi', 'baseline')}/fermi-out/final.fits")
+        gta.load_roi( get_results_dir(target, kwargs.get('load-roi', 'baseline'), output = "fermi-out").joinpath("final.fits") )
 
         # Freeze all parameters
         gta.free_sources(free = False)
@@ -159,8 +265,8 @@ if __name__ == "__main__":
                       write_fits = True, write_npy = True, make_plots = True, )
     # Compute PS map
     psmap = gta.psmap(prefix = "final_ps",
-                      cmap = RESULTS_DIR / f"{target}/{args.bblock}/fermi-out/ccube_00.fits", 
-                      mmap = RESULTS_DIR / f"{target}/{args.bblock}/fermi-out/mcube_final_00.fits", 
+                      cmap = get_results_dir(target, args.bblock, output = "fermi-out").joinpath("ccube_00.fits"),
+                      mmap = get_results_dir(target, args.bblock, output = "fermi-out").joinpath("mcube_final_00.fits"),
                       nbinloge = 14,
                       write_fits = True, make_plots = True,
                       emin = 1000, emax = 300000, )

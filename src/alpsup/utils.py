@@ -26,7 +26,7 @@ from    gammapy.modeling.models import (PowerLawSpectralModel,
                                         Models, Model,
                                         create_fermi_isotropic_diffuse_model,)
 
-from    alpsup.paths            import  SOURCES_FILE, get_results_dir
+from    alpsup.paths            import  FERMIPY_DATA_DIR, SOURCES_FILE, get_results_dir
 
 
 def get_source_list() -> list:
@@ -186,8 +186,7 @@ def get_fermipy_models(target, models = None, bblock = None):
     target_4FGL, _, _ = get_source_info(target = target)
 
     # Define the directory containing the XML file
-    dir = ("{}/{}/{}/fermi-out/final_00.xml").format(os.environ['RESULTS'], target, bblock)
-    # dir = get_results_dir(source = target, bblock = bblock)
+    dir = get_results_dir(target, bblock, output = "fermi-out/final_00.xml")
 
     # Load the XML file containing best-fit final models from FermiPy
     tree = ET.parse(source = dir)
@@ -238,7 +237,7 @@ def get_fermipy_models(target, models = None, bblock = None):
                 # Spatial model from template - MapCubeFunction (params: Normalization)
                 spatial_model = TemplateSpatialModel.read(
                     # filename = "$FERMIPY_DATA/gll_iem_v07.fits",
-                    filename = f"{os.environ['FERMIPY_DATA']}/gll_iem_v07.fits",
+                    filename = FERMIPY_DATA_DIR / "gll_iem_v07.fits",
                     normalize = False, ).copy()
                 # Spectral model - PowerLawNorm
                 spectral_model = PowerLawNormSpectralModel().copy()
@@ -250,7 +249,7 @@ def get_fermipy_models(target, models = None, bblock = None):
 
                 # Load isotropic model directly with built-in function as a dataset object
                 iso_model = create_fermi_isotropic_diffuse_model(
-                    filename = ("{}/iso_P8R3_SOURCE_V3_v1.txt").format(os.environ['FERMIPY_DATA']),
+                    filename = FERMIPY_DATA_DIR / "iso_P8R3_SOURCE_V3_v1.txt",
                     datasets_names = "Fermi-LAT"
                 ).copy("name = Isotropic")
                 spatial_model = iso_model.spatial_model.copy()

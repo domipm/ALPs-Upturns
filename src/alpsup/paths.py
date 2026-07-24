@@ -112,21 +112,11 @@ def get_results_dir(source: str | None = None,
     # Append output suffix
     if output is not None:
         results_path /= output
+
+    # Make sure path exists, if not, create it
+    if not os.path.exists(results_path):
+        os.makedirs(results_path, exist_ok = True)
+        
     # Return final path
     return results_path
-
-
-# TODO: IMPLEMENT GLOBAL FUNCTION?
-
-
-def get_dir(input: str,
-            source: str | None = None, 
-            bblock: str | None = None, 
-            ebl: str | None = None, 
-            output: str | None = None) -> Path:
-    """
-    Get directory path
-    """
-
-    return
 

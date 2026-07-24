@@ -1,6 +1,7 @@
 # Contains all custom models used for ALP upturn search
 # As well as compound model and on-off dataset including bias prior
 
+from    __future__              import  annotations
 
 import  yaml
 
@@ -12,7 +13,7 @@ from    gammapy.datasets            import  SpectrumDatasetOnOff, DATASET_REGIST
 from    gammapy.maps                import  MapAxis
 from    gammapy.estimators.map.core import  DEFAULT_UNIT
 from    gammapy.modeling            import  Parameter, Parameters
-from    gammapy.modeling.models     import  SpectralModel, SPECTRAL_MODEL_REGISTRY, scale_plot_flux
+from    gammapy.modeling.models     import  SpectralModel, EBLAbsorptionNormSpectralModel, TemplateSpectralModel, SPECTRAL_MODEL_REGISTRY, scale_plot_flux
 from    gammapy.utils.scripts       import  make_path
 
 from    astropy.visualization       import  quantity_support
@@ -174,7 +175,6 @@ class BiasedPriorSpectrumDatasetOnOff(SpectrumDatasetOnOff):
         # If bias parameter found and not frozen
         if bias_par is not None and not bias_par.frozen:
             # Add to statistic
-            # stat += (bias_par.value / ( np.sqrt(2) * self._sigma_bias ) ) ** 2
             stat += (bias_par.value / self._sigma_bias) ** 2
 
         # Return final stat
@@ -191,7 +191,7 @@ class BiasedCompoundSpectralModel(SpectralModel):
 
     tag = "BiasedCompositeSpectralModel"
     bias = Parameter(name = "bias",
-                     value = 0.0,
+                     value = 0.00,
                      min = - 0.25,
                      max = + 0.25, )
     
@@ -222,9 +222,6 @@ class BiasedCompoundSpectralModel(SpectralModel):
 
         args1 = args[: len(self.model1.parameters)]
         args2 = args[len(self.model1.parameters) :]
-
-        print(args1)
-        return
 
         val1 = self.model1.evaluate(energy, *args1)
         val2 = self.model2.evaluate(energy, *args2)
@@ -388,3 +385,296 @@ SPECTRAL_MODEL_REGISTRY.append(BiasedCompoundSpectralModel)
 # Add custom dataset to registry for serizalization
 DATASET_REGISTRY.append(BiasedPriorSpectrumDatasetOnOff)
 
+
+# TODO: SIMPLE EBLTABLE MODEL WRAPPER
+
+
+class EBLTableSpectralModel(TemplateSpectralModel):
+
+    tag = ["EBLTableSpectralModel"]
+
+    def __init__(self, energy: u.Quantity, values: np.ndarray, 
+                 ebl_name: str | None = None, redshift: float | np.floating | None = None, 
+                 **kwargs, ):
+        
+        self._ebl_name = ebl_name
+        self._redshift = redshift
+
+        super().__init__(energy = energy, values = values, 
+                         meta = {"name": self._ebl_name, "redshift": self._redshift},
+                         **kwargs, )
+        
+    @property
+    def ebl_name(self):
+        return self._ebl_name
+    
+    @property
+    def redshift(self):
+        return self._redshift
+        
+    @classmethod
+    def read_ebl(cls, energy = None,
+                 ebl_name = "dominguez", redshift = 0.1, ):
+        """Build directly from EBLTable, given a model name and redshift"""
+
+        if energy is None:
+            # Define energy array to evaluate
+            energy = np.logspace(-1, 1.5, 200) * u.TeV
+
+        from ebltable.tau_from_model import OptDepth
+        # Construct optical depth from model data
+        tau = OptDepth.readmodel(model = ebl_name)
+        att = np.exp(-1.0 * tau.opt_depth(redshift, energy.value))
+
+        return cls(energy = energy, values = att * u.dimensionless_unscaled,
+                   ebl_name = ebl_name, redshift = redshift, )
+    
+    def to_dict(self, full_output = False):
+
+        data = super().to_dict(full_output=full_output)["spectral"]
+
+        items = list(data.items())
+        idx = next(i for i, (k, _) in enumerate(items) if k == "parameters")
+
+        items[idx:idx] = [
+            ("ebl_name", self.ebl_name),
+            ("redshift", self.redshift),
+        ]
+
+        return {"spectral": dict(items)}
+
+    @classmethod
+    def from_dict(cls, data):
+        
+        data = data.copy()
+
+        ebl_name = data["spectral"].pop("ebl_name", None)
+        redshift = data["spectral"].pop("redshift", None)
+
+        template = TemplateSpectralModel.from_dict(data)
+
+        return cls(energy = template.energy, values = template.values,
+                   ebl_name = ebl_name, redshift = redshift, )
+
+
+# TODO: SIMPLE SPECTRAL MODEL WRAPPER FOR UPTURN MODEL
+
+
+class UpturnSpectralModel(SpectralModel):
+
+    # Define tag for model
+    tag = ["UpturnSpectralModel"]
+
+    # Define parameters
+    indexdelta_upt = Parameter(
+        name = "indexdelta_upt",
+        value = -2.0,
+        min = -5.0,
+        max = 0.0,
+        frozen = False, )
+    beta_upt = Parameter(
+        name = "beta_upt",
+        value = 1.00,
+        min = 0.01,
+        max = 1.00,
+        frozen = True, )
+    e_upt = Parameter(
+        name = "e_upt",
+        value = 1.0,
+        unit = "TeV",
+        min = 0.1,
+        max =  31.6,
+        frozen = False, )
+    
+    # Evaluate method - return function value
+    @staticmethod
+    def evaluate(energy, indexdelta_upt, beta_upt, e_upt):
+        # Multiply beta by sign of delta index (!)
+        beta_upt *= np.sign(indexdelta_upt)
+        # Return spectral model evaluated at energy and indices
+        return (1 + (energy / e_upt) ** ( (indexdelta_upt) / beta_upt ) ) ** (- beta_upt)
+
+
+# TODO: GLOBAL WRAPPER THAT CONTAINS INTRINISC MODEL, EBL ABSORPTION, BIAS, AND UPTURN TERMS
+
+
+class CompositeSpectralModel(SpectralModel):
+
+
+    tag = "CompositeSpectralModel"
+
+    # Bias parameter
+    bias = Parameter(name = "bias",
+                     value = 0.00,
+                     min = -0.25,
+                     max = +0.25,
+                     frozen = False, )
+
+    def __init__(self, 
+                 intrinsic_model: SpectralModel, 
+                 # TODO: Implement GammaPy built-in EBL model as well
+                 ebl_model: EBLTableSpectralModel | TemplateSpectralModel | None, 
+                 upturn_model: UpturnSpectralModel | None = UpturnSpectralModel(),
+                 bias: float | u.Quantity = bias.quantity, 
+                 **kwargs):
+
+        self._intrinsic_model = intrinsic_model
+        self._ebl_model = ebl_model
+        self._upturn_model = upturn_model
+        self._bias = bias
+
+        super().__init__(bias = bias, **kwargs)
+
+    def _get_kwargs(model, kwargs):
+
+        # Construct dictionary for the kwargs of each model component
+        return {name: kwargs.pop(name) for name in model.parameters.names}
+
+    @property
+    def intrinsic_model(self):
+        return self._intrinsic_model
+    
+    @property
+    def ebl_model(self):
+        return self._ebl_model
+    
+    @property
+    def upturn_model(self):
+        return self._upturn_model
+    
+    @property
+    def parameters(self):
+
+        # Define total parameters
+        pars = Parameters([])
+
+        # Intrinsic parameters
+        pars_int = self._intrinsic_model.parameters
+
+        # Add intrinsic parameters to total
+        pars += pars_int
+
+        # EBL parameters, if given
+        if self._ebl_model is not None:
+            pars += self._ebl_model.parameters
+        # Upturn parameters, if given
+        if self._upturn_model is not None:
+            pars += self._upturn_model.parameters
+        # Bias parameter, if given
+        if self.bias is not None:
+            pars += Parameters([self.bias])
+
+        # Return all existing parameters
+        return pars
+    
+    @property
+    def pivot_energy(self):
+        # Ensure pivot / decorrelation energy computed on intrinsic model
+        return self._intrinsic_model.pivot_energy
+
+    def evaluate(self, energy, **kwargs):
+
+        # Get bias parameter from keyword arguments
+        bias = kwargs.pop("bias")
+        # Rescale energy with bias (no rescaling if zero)
+        energy_re = energy * (1.0 + bias)
+
+        # Get intrinsic model parameters and evaluate it
+        kwargs_int = {}
+        for name in self._intrinsic_model.parameters.names:
+            kwargs_int[name] = kwargs.pop(name)
+        eval_int = self._intrinsic_model.evaluate(energy_re, **kwargs_int)
+
+        # Get EBL parameters and evaluate EBL model, if given
+        if self._ebl_model is not None:
+            kwargs_ebl = {}
+            for name in self._ebl_model.parameters.names:
+                kwargs_ebl[name] = kwargs.pop(name)
+            eval_ebl = self._ebl_model.evaluate(energy_re, **kwargs_ebl)
+        else:
+            eval_ebl = 1.0
+
+        # Get upturn parameters and evaluate, if given
+        if self._upturn_model is not None:
+            kwargs_upt = {}
+            for name in self._upturn_model.parameters.names:
+                kwargs_upt[name] = kwargs.pop(name)
+            eval_upt = self._upturn_model.evaluate(energy_re, **kwargs_upt)
+        else:
+            eval_upt = 1.0
+
+        # Final evaluation result
+        return eval_int * eval_ebl * eval_upt
+    
+    # Override evaluation of error to ensure keyword arguments (for error plotting)
+    def evaluate_error(self, energy, n_samples = 3500, random_state = 42, samples = None):
+
+        m = self.copy()
+        pars_names = [p.name for p in m.parameters]
+        def fct(*args):
+            kwargs = dict(zip(pars_names, args))
+            return m.evaluate(energy, **kwargs)
+        
+        propagated_samples = self._samples(
+            fct,
+            n_samples = len(pars_names) * n_samples,
+            random_state = random_state,
+            samples = samples, )
+
+        return self._get_errors(propagated_samples)
+    
+    @classmethod
+    def from_dict(cls, data):
+        """Deserialize model from dictionary"""
+
+        # Reconstruct intrinsic spectral model
+        intrinsic_data = data["spectral"].pop('intrinsic_model')["spectral"]
+        intrinsic_tag = intrinsic_data.get('type')
+        intrinsic_model_cls = SPECTRAL_MODEL_REGISTRY.get_cls(intrinsic_tag)
+        intrinsic_model = intrinsic_model_cls.from_dict(intrinsic_data)
+
+        # Reconstruct EBL model
+        ebl_data = data["spectral"].pop('ebl_model')
+        ebl_tag = ebl_data["spectral"].get('type')
+        ebl_model_cls = SPECTRAL_MODEL_REGISTRY.get_cls(ebl_tag)
+        ebl_model = ebl_model_cls.from_dict(ebl_data)
+
+        # Load parameters of biased composite model
+        biascomp_data = data["spectral"]["parameters"]
+
+        biascomp_params = Parameters.from_dict(   
+           data = biascomp_data, )
+
+        # Create model instance
+        model = cls(
+            intrinsic_model = intrinsic_model,
+            ebl_model = ebl_model,
+            bias = biascomp_params["bias"].value, )
+        
+        # Upadate bias error
+        model.parameters["bias"].error = biascomp_params["bias"].error
+
+        # Return final version of model with all parameters
+        return model
+
+    def to_dict(self, full_output = False):
+        """Serialize model to dictionary with all components"""
+
+        # Call original function to generate dictionary
+        data = super().to_dict(full_output = full_output)
+
+        # Add intrinsic model information
+        data["spectral"]["intrinsic_model"] = self._intrinsic_model.to_dict(full_output = full_output)
+        # Add EBL model information
+        data["spectral"]['ebl_model'] = self._ebl_model.to_dict(full_output = full_output)
+        # Add upturn model, if given
+        if self._upturn_model is not None:
+            data["spectral"]["upturn_model"] = self._upturn_model.to_dict(full_output = full_output)
+
+        return data
+
+
+# Add new custom models to registry for serialization
+SPECTRAL_MODEL_REGISTRY.append(EBLTableSpectralModel)
+SPECTRAL_MODEL_REGISTRY.append(UpturnSpectralModel)
+SPECTRAL_MODEL_REGISTRY.append(CompositeSpectralModel)

@@ -30,8 +30,8 @@ from    ebltable.tau_from_model     import  OptDepth
 from    alpsup.utils                import  get_source_info, par_uconv, parse_kwargs, get_edec, get_source_list
 from    alpsup.plots                import  plot_sed_gammapy
 from    alpsup.models               import  BiasedCompoundSpectralModel, BiasedPriorSpectrumDatasetOnOff
-from    alpsup.paths                import  gen_dirs, get_results_dir, get_hess_data_dir
-from    alpsup.datasets             import  get_hess_dataset
+from    alpsup.paths                import  gen_dirs, get_results_dir, get_hess_data_dir, SOURCES_FILE
+from    alpsup.datasets             import  get_hess_dataset, ATOL
 from    alpsup.logs                 import  init_log
 
 
@@ -58,8 +58,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--sed_type", default = "e2dnde", choices = ["e2dnde", "dnde"], type = str)
 
-    parser.add_argument("--bias", default = True, choices = [True, False], type = bool)
-
     parser.add_argument("--include-spatial", action = "store_true", help = "Include spatial model to SkyModel of target")
 
     parser.add_argument("--plots-only", action = "store_true", help = "Run only generation of plots from files")
@@ -77,15 +75,13 @@ if __name__ == "__main__":
     # Get info of source
     target_4FGL, target_position, target_redshift = get_source_info(target)
 
-    # Generate and check directories (depends on time block and EBL model)
-    gen_dirs(target, bblock = args.bblock, ebl = args.ebl)
-
     # Define output directories
     dir_gout = get_results_dir(source = target, bblock = args.bblock, ebl = args.ebl, output = "gamma-out")
 
     # Run plotting-only
     if args.plots_only:
-        plot_sed_gammapy(target = target, bblock = args.bblock, sed_type = args.sed_type, inst = "hess", **kwargs)
+        plot_sed_gammapy(target = target, bblock = args.bblock, ebl = args.ebl, sed_type = args.sed_type, inst = "hess", **kwargs)
+        plot_sed_gammapy(target = target, bblock = args.bblock, ebl = args.ebl, inst = "hess_bias", **kwargs)
         exit()
 
     # Initialize logging (initialize after possible plotting, otherwise gets removed!)
@@ -100,23 +96,22 @@ if __name__ == "__main__":
 
     log.info(f"Loading HESS data from {args.dataset} dataset using {args.config} configuration...")
 
-    '''
     try:
         # Load time selection from bblock config file in baseline if available
-        with open(f"../sources/bblocks.yaml") as f:
+        with open(SOURCES_FILE.parent / "bblocks.yaml") as f:
             config = yaml.safe_load(f)[target]
-        t_min = config[args.bblock.split("-")[0]]["tmin"]
-        t_max = config[args.bblock.split("-")[0]]["tmax"]
-        # log.info("Loaded time selection from time block config file")
-
-    # Otherwise, use default time selection
+        t_min = config[args.bblock]["tmin"]
+        t_max = config[args.bblock]["tmax"]
+        log.info("Loaded time selection from time block config file")
+        dataset_hess_obs, dataset_hess = get_hess_dataset(target, dataset = args.dataset, config = args.config,
+                                                          time_select_min = t_min, time_select_max = t_max)
+        
+    # Otherwise, use default time selection based on GTIs of the dataset
     except:        
+        dataset_hess_obs, dataset_hess = get_hess_dataset(target, dataset = args.dataset, config = args.config)
         t_min = kwargs.get('tmin', sorted(dataset_hess_obs.gti.time_start)[0].mjd)
         t_max = kwargs.get('tmax', sorted(dataset_hess_obs.gti.time_start)[-1].mjd)
-        # log.info("Loaded time selection from custom kwargs / default GTIs")
-    '''
-
-    dataset_hess_obs, dataset_hess = get_hess_dataset(target)
+        log.info("Loaded time selection from custom kwargs / default GTIs")
 
     # Display summary of dataset
     log.info("HESS dataset summary")
@@ -300,25 +295,16 @@ if __name__ == "__main__":
     
     # Save flux points table to file
     ascii.write(
-        table = fluxp_hess.to_table(sed_type = args.sed_type, # sed_type = "e2dnde", 
+        table = fluxp_hess.to_table(sed_type = args.sed_type, 
                                     format = "gadf-sed"), format = 'ecsv',
         output = dir_gout.joinpath("hess_fluxp.ecsv"),
         overwrite = True, )
     # Save flux points as fits as well
-    fluxp_hess.write(filename = dir_gout.joinpath("hess_fluxp.fits"), sed_type = args.sed_type, # sed_type = "e2dnde", 
+    fluxp_hess.write(filename = dir_gout.joinpath("hess_fluxp.fits"), sed_type = args.sed_type,
                      format = "gadf-sed", overwrite = True, )
     
-
-    # TODO: CONTINUE FROM HERE!
-    # exit()
-
-
     # Plot HESS model and flux points        
-    plot_sed_gammapy(target = target, bblock = args.bblock, inst = "hess", sed_type = args.sed_type)
-
-    # Run biased fit if required
-    if args.bias == False or args.bias == "False":
-        exit()
+    plot_sed_gammapy(target = target, bblock = args.bblock, ebl = args.ebl, inst = "hess", sed_type = args.sed_type)
 
     # ========== #
     # BIASED FIT #
@@ -340,12 +326,10 @@ if __name__ == "__main__":
         spatial_model = dataset_hess.models[target].spatial_model,
         name = target, )
 
-    # Set bias prior to 15%
-    sigma_bias = 0.15
-
     # Wrap dataset with bias prior
     dataset_hess_bias = BiasedPriorSpectrumDatasetOnOff.from_spectrum_dataset(
-        dataset_hess, sigma_bias, )
+        # Set bias prior to 15%
+        dataset_hess, sigma_bias = 0.15, )
     
     # Add biased model
     dataset_hess_bias.models = Models(model_hess_bias)
@@ -373,20 +357,20 @@ if __name__ == "__main__":
     
     # Save final results
     results_bias.write(
-        path = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/hess_bias_results.yaml",
+        path = dir_gout / "hess_bias_results.yaml" ,
         overwrite = True, )
     # Save final datasets and model
     datasets_hess_bias.write(
-        filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/hess_bias_datasets.yaml",
-        filename_models = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/hess_bias_models.yaml",
+        filename = dir_gout / "hess_bias_datasets.yaml",
+        filename_models = dir_gout / "hess_bias_models.yaml",
         overwrite = True, )
     # Save flux points on biased data
     ascii.write(
         table = fluxp_hess.to_table(sed_type = "e2dnde", format = "gadf-sed"), format = 'ecsv',
-        output = dir_gout.joinpath("hess_bias_fluxp.ecsv"),
+        output = dir_gout / "hess_bias_fluxp.ecsv",
         overwrite = True, )
     # Save flux points as fits as well
-    fluxp_hess.write(filename = dir_gout.joinpath("hess_bias_fluxp.fits"), sed_type = "e2dnde", 
+    fluxp_hess.write(filename = dir_gout / "hess_bias_fluxp.fits", sed_type = "e2dnde", 
                      format = "gadf-sed", overwrite = True, )
 
     # ============== #
@@ -395,8 +379,8 @@ if __name__ == "__main__":
 
     log.info(f"Saving final plots...")
     # Plot HESS model and flux points        
-    plot_sed_gammapy(target = target, bblock = args.bblock, inst = "hess")
+    plot_sed_gammapy(target = target, bblock = args.bblock, ebl = args.ebl, inst = "hess")
     # Plot HESS bias model and flux points
-    plot_sed_gammapy(target = target, bblock = args.bblock, inst = "hess_bias")
+    plot_sed_gammapy(target = target, bblock = args.bblock, ebl = args.ebl, inst = "hess_bias")
 
     log.info(f"H.E.S.S. GammaPy Analysis complete! :)")
