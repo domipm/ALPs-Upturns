@@ -403,7 +403,7 @@ class EBLTableSpectralModel(TemplateSpectralModel):
         super().__init__(energy = energy, values = values, 
                          meta = {"name": self._ebl_name, "redshift": self._redshift},
                          **kwargs, )
-        
+
     @property
     def ebl_name(self):
         return self._ebl_name
@@ -414,7 +414,7 @@ class EBLTableSpectralModel(TemplateSpectralModel):
         
     @classmethod
     def read_ebl(cls, energy = None,
-                 ebl_name = "dominguez", redshift = 0.1, ):
+                 ebl_name: str | None = "dominguez", redshift = 0.1, ):
         """Build directly from EBLTable, given a model name and redshift"""
 
         if energy is None:
@@ -645,10 +645,20 @@ class CompositeSpectralModel(SpectralModel):
         biascomp_params = Parameters.from_dict(   
            data = biascomp_data, )
 
+        # Get upturn parameters, if present
+        try:
+            upturn_data = data["spectral"].pop('upturn_model')["spectral"]
+            upturn_tag = upturn_data["spectral"].get('type')
+            upturn_model_cls = SPECTRAL_MODEL_REGISTRY.get_cls(upturn_data)
+            upturn_model = upturn_model_cls.from_dict(upturn_data)
+        except:
+            upturn_model = None
+
         # Create model instance
         model = cls(
             intrinsic_model = intrinsic_model,
             ebl_model = ebl_model,
+            upturn_model = upturn_model,
             bias = biascomp_params["bias"].value, )
         
         # Upadate bias error

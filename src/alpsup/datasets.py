@@ -1,4 +1,6 @@
 import  os
+import  warnings
+
 import  astropy.units       as      u
 
 from    pathlib                 import  Path
@@ -28,7 +30,7 @@ def get_hess_dataset(target: str,
                      bblock: str | None = None):
 
     # Load dataset from folder
-    path = get_hess_data_dir(target, hap_dataset = dataset, hap_config = config)
+    path = get_hess_data_dir(target, hap_dataset = dataset.lower(), hap_config = config)
 
     # Get all fits files
     obs_rmfs  = list(path.glob('*rmf.fits'))
@@ -46,11 +48,10 @@ def get_hess_dataset(target: str,
     # Perform time selection
     # If values given (in MJD by default)
     if time_select_min is not None and time_select_max is not None:
-        dataset_obs.select_time(
+        dataset_obs = dataset_obs.select_time(
             atol = time_select_atol,
             time_min = Time( [time_select_min], format = time_select_fmt ),
             time_max = Time( [time_select_max], format = time_select_fmt, ) )
-    # TODO: INCORPORATE TIME SELECTION HERE?
     # If values not given...
     else:
         # If bblock specified, attempt to read from file
@@ -58,7 +59,7 @@ def get_hess_dataset(target: str,
             pass
         # Otherwise, default to GTIs of the dataset
         else: 
-            dataset_obs.select_time(
+            dataset_obs = dataset_obs.select_time(
                 atol = time_select_atol,
                 time_min = Time( [sorted(dataset_obs.gti.time_start)[0].mjd], format = "mjd" ),
                 time_max = Time( [sorted(dataset_obs.gti.time_start)[-1].mjd], format = "mjd", ) )
@@ -123,13 +124,16 @@ def get_flat_dataset(target: str,
 
         # Get all models inside  roi
         models_in  = Models([model for model in models if model not in models_out])
+
         # Convert models outside roi into template
         if combine_bkg_models:
-            models_out = models_out.to_template_sky_model(
-                geom = dataset_flat.exposure.geom, name = "Models Background", )
-
-        # Add name for serialization
+            # NOTE: Suppress warning re: "template_model.filename" (it is added just after)
+            with warnings.catch_warnings(action = "ignore"):
+                models_out = models_out.to_template_sky_model(
+                    geom = dataset_flat.exposure.geom, name = "Models Background")
+        # Add filename for serialization
         models_out.spatial_model.filename = f"{get_results_dir(target, bblock, output = "gamma-out")}/flat_models_background.fits"
+        
         # Add dataset name to model
         models_out.datasets_names = "Fermi-LAT"
         # Write out spatial model to file

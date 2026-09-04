@@ -23,12 +23,14 @@ FLAT_DATA_SPACECRAFT_FILE = Path(FLAT_DATA_DIR / "spacecraft.fits")
 FERMIPY_DATA_DIR = Path(os.environ.get("FERMIPY_DATA", REPO_ROOT / "data" / "fermipy-data"))
 GAMMAPY_DATA_DIR = Path(os.environ.get("GAMMAPY_DATA", REPO_ROOT / "data" / "gammapy-data"))
 
+# Configurations path
+CONFIGS_DIR = Path(REPO_ROOT / "configs")
+
 # Results folder
 RESULTS_DIR = Path(REPO_ROOT / "results")
 
 # Path to sources.yaml file (containing info on all sources)
 SOURCES_FILE = Path(REPO_ROOT / "sources" / "sources.yaml")
-
 
 def gen_dirs(source: str, bblock: str, ebl: str | None = None) -> None:
     """

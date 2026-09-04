@@ -1,4 +1,4 @@
-from    __future__              import  annotations
+from    __future__                  import  annotations
 
 import  os
 import  glob
@@ -8,8 +8,6 @@ import  numpy                       as      np
 
 from    pathlib                     import  Path
 from    typing                      import  Optional, Tuple
-
-from    scipy.special               import  gammaincinv
 
 import  astropy.units               as      u
 from    astropy.io                  import  fits, ascii
@@ -206,8 +204,8 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", ebl: str = None,
             ax.xaxis.set_units(fp_data['eref'].unit)
             ax.yaxis.set_units(fp_data[sed_type].unit)
             # Ensure correct units for e2dnde sed
-            # if sed_type == "e2dnde":
-            #     ax.yaxis.set_units(fp_data[sed_type].to("TeV s-1 cm-2").unit)
+            if sed_type == "e2dnde":
+                ax.yaxis.set_units(fp_data[sed_type].to("TeV s-1 cm-2").unit)
         # Set logarithmic scale
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -244,6 +242,10 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", ebl: str = None,
             ebounds = fp_data['ebounds']
         else:
             ebounds = model_ebounds
+        # TODO: FIX ENERGY BOUNDS SETTING
+        if inst == "joint":
+            ebounds = [0.001, 31.6] * u.TeV
+
         # Plot model
         model.spectral_model.plot(
             ax = ax, 
@@ -361,7 +363,11 @@ def plot_sed_joint(target: str, bblock: str = "baseline", ebl: str | None = "dom
     # Plot joint model
     plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False, color = "black")
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
-    plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_flat", ax = ax, plot_model= False, save_plot = False)
+    # TODO: CHECK IF FERMI-LAT IS AVAILABLE FOR THIS SOURCE!
+    try:
+        plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_flat", ax = ax, plot_model= False, save_plot = False)
+    except:
+        pass
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
     plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_hess", ax = ax, plot_model = False, save_plot = False)
 
@@ -664,14 +670,15 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
             
             # Compute weights considering error values
             weights = 1.0 / sigma**2
-            print("weight!")
-            print(weights)
+            # TODO: REMOVE
+            # print("weight!")
+            # print(weights)
             # Compute weighted average of value
             mean_val = np.nansum(weights * lc_table[val][mask]) / np.nansum(weights)
-            print("vals")
-            print(lc_table[val][mask])
-            print("mea")
-            print(mean_val)
+            # print("vals")
+            # print(lc_table[val][mask])
+            # print("mea")
+            # print(mean_val)
 
             # NOTE: Altenratively, simple arithmetic mean
             # mean_val = np.nanmean(lc_table[val][mask])
@@ -713,7 +720,7 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         x = lc_table["time_ref"][mask_notul].value.squeeze(),
         y = lc_table["dnde"][mask_notul].value.squeeze(),
         xerr = [lc_table["time_ref"][mask_notul] - lc_table["time_min"][mask_notul], lc_table["time_max"][mask_notul] - lc_table["time_ref"][mask_notul]],
-        yerr = [lc_table["dnde_errn"][mask_notul].value.squeeze(), lc_table["dnde_errp"][mask_notul].value.squeeze()],
+        yerr = [lc_table["dnde_errn"][mask_notul].value.flatten(), lc_table["dnde_errp"][mask_notul].value.flatten()],
         linestyle = "", marker = ".", color = kwargs["color_flux"],
         capsize = 2, zorder = 4, )
     # Plot flux points - UL
@@ -721,7 +728,7 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
         x = lc_table["time_ref"][mask_ul].value.squeeze(),
         y = lc_table["dnde"][mask_ul].value.squeeze(),
         xerr = [lc_table["time_ref"][mask_ul] - lc_table["time_min"][mask_ul], lc_table["time_max"][mask_ul] - lc_table["time_ref"][mask_ul]],
-        yerr = np.vstack([lc_table["dnde_errn"][mask_ul].value.squeeze(), lc_table["dnde_errp"][mask_ul].value.squeeze()]),
+        yerr = np.vstack([lc_table["dnde_errn"][mask_ul].value.flatten(), lc_table["dnde_errp"][mask_ul].value.flatten()]),
         linestyle = "",
         marker = "v",
         capsize = 0,
@@ -803,8 +810,8 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
 
     ax[1].hlines(
         y = mean_indices,
-        xmin = lc_flux_bblock_table["time_min"],
-        xmax = lc_flux_bblock_table["time_max"],
+        xmin = lc_index_bblock_table["time_min"].value.squeeze(),
+        xmax = lc_index_bblock_table["time_max"].value.squeeze(),
         color = kwargs["color_index_bb"],
         linestyle = "-.",
         linewidth = 1,
@@ -819,7 +826,10 @@ def plot_lightcurve(target: str, bblock: str = "baseline", **kwargs) -> None:
     return
 
 
-def plot_ellipses(target: str, bblock: str = "baseline", ebl: str = "dominguez", print_labels: bool = False, **kwargs) -> None:
+def plot_ellipses(target: str, 
+                  bblock: str = "baseline",
+                  print_labels: bool = False,
+                  sigma_overlap: float = 3, **kwargs) -> None:
     """
     Plot best-fit index versus amplitude / normalization ellipses
     """
@@ -830,7 +840,7 @@ def plot_ellipses(target: str, bblock: str = "baseline", ebl: str = "dominguez",
     # Extract Bayesian block edges for flux
     bblocks_edges_flux = [lc_bblock_table["time_min"][0]]
     bblocks_edges_flux.extend(lc_bblock_table["time_max"])
-
+    # Get times of Bayesian blocks
     fit_times_bb_flux = [Time(val = list(p), format = "mjd") for p in zip(bblocks_edges_flux, bblocks_edges_flux[1:])]
 
     # Load the covariance matrix of each block
@@ -845,72 +855,69 @@ def plot_ellipses(target: str, bblock: str = "baseline", ebl: str = "dominguez",
     # Convert block indices into colors
     colors = cmap(fp_block - 1)
 
-    for k, result in enumerate(lc_bblock_table):
+    ellipse_data = np.load(
+        get_results_dir(target, bblock, output = "gamma-out") / "lc_ellipses.npy",
+        allow_pickle = True, ).item()
 
-        # Get value of index and amplitude
-        index_val = result["index"]
-        index_err = result["index_err"]
-        amplitude_val = result["amplitude"]
-        amplitude_err = result["amplitude_err"]
+    # Load points, ellipses, and block times
+    points = ellipse_data["points"]
+    errors = ellipse_data["errors"]
+    ellipses = ellipse_data["ellipses"]
+    times = ellipse_data["times"]
 
-        # Get sub-covariance matrix for index-amplitude for block
-        cov = cov_bblock[k]
+    # Loop over each Bayesian block
+    for k, time in enumerate(times):
 
-        # Compute eigenvalues of covariance matrix
-        w, v = np.linalg.eig(cov)
+        index_val = points[k, 0]
+        amplitude_val = points[k, 1]
+        index_err = errors[k, 0]
+        amplitude_err = errors[k, 1]
 
-        # Compute alpha angle to rotate ellipses (in degrees)
-        # choosing the eigenvector corresponding to the largest eigenvalue
-        vec = v[:, np.argmax(w)]
-        alpha = np.rad2deg( np.arctan2( vec[1], vec[0] ) )
+        # Loop over confidence intervals and plot ellipses for each point
+        for ic in range(3):
+            a, b, angle = ellipses[k, ic]
+            ellipse = Ellipse(
+                # Center ellipse at point
+                xy = (points[k, 1], points[k, 0]),
+                # Define axes
+                width = b, height = a,
+                # Define transparency
+                alpha = [0.75, 0.5, 0.25][ic],
+                # Rotate ellipse
+                angle = angle,
+                # Color the edges
+                edgecolor = "black",
+                # Edge linestyle
+                linestyle = "-",
+                # Edge width
+                linewidth = 0.5,
+                # Use color for edges, otherwise facecolor
+                facecolor = colors[k], )
+            # Plot the ellipse
+            ax.add_patch(ellipse)   
 
-        # Iterate over confidence levels
-        for ic, l in enumerate( [0.68, 0.95, 0.99] ):
+        # Print label for each point for identification
+        if print_labels:
+            ax.annotate(
+                text = k + 1,
+                # TODO: These "margins" aren't ideal...
+                xy = (amplitude_val + 0.05 * amplitude_val, index_val + 0.015 * index_val), )
 
-            # Compute ellipse axes
-            a = 2. * np.sqrt( gammaincinv(1, l) * w[0] )
-            b = 2. * np.sqrt( gammaincinv(1, l) * w[1] )
-
-            # Compute the ellipse (plot only if height and width are physically correct)
-            if np.isfinite(a) and np.isfinite(b) and a > 0 and b > 0 and amplitude_val > 0 and index_val > 0:
-                ellipse = Ellipse(
-                    # Center ellipse at point
-                    xy = (amplitude_val,
-                        index_val),
-                    # Define axes
-                    width = b, height = a,
-                    # Define transparency
-                    alpha = [0.75, 0.5, 0.25][ic],
-                    # Rotate ellipse
-                    angle = alpha,
-                    # Use color for edges, otherwise facecolor
-                    facecolor = colors[k], )
-                # Plot the ellipse
-                ax.add_patch(ellipse)
-
-        # Plot index and normalization points
+        # Plot corresponding point
         ax.errorbar(
-            x = amplitude_val,
+            x = amplitude_val, 
             y = index_val,
-            xerr = np.sqrt(cov[1, 1]),
-            # xerr = amplitude_err,
-            yerr = np.sqrt(cov[0, 0]),
-            # yerr = index_err,
-            # Label edges of Bayesian blocks
-            label = "[{:.3f} - {:.3f}] MJD".format( 
-                fit_times_bb_flux[k][0].mjd, fit_times_bb_flux[k][1].mjd ),
+            xerr = amplitude_err, 
+            yerr = index_err,
+            capsize = 2,
+            linestyle = "", 
+            label = f"[{time[0]:.3f} - {time[1]:.3f}] MJD",
             color = colors[k],
             markerfacecolor = colors[k],
             markeredgecolor = 'black',
             ecolor = 'black',
             marker = ".", )
-        
-        # Print label for each point for identification
-        if print_labels:
-            ax.annotate(
-                text = k + 1,
-                xy = (amplitude_val + 0.05 * amplitude_val, index_val), )
-        
+
     # Set axes
     ax.set_title(f"{target} Best-fit Ellipses")
     ax.set_xlabel(r"Normalization $N_0$ [TeV$^{-1}$ cm$^{-2}$ s$^{-1}$ ]")
@@ -927,9 +934,10 @@ def plot_ellipses(target: str, bblock: str = "baseline", ebl: str = "dominguez",
         pass
     # If position for legend given, move it there!
     else:
-        ax.legend(loc = kwargs["loc"], fontsize = kwargs.get("fontsize", None), ncols = kwargs.get("ncols", 1))
-    # ax.legend( loc = 'upper center', bbox_to_anchor = (0.5, -0.15) ) # Bottom center
-    # Save figure
+        ax.legend( loc = kwargs["loc"], fontsize = kwargs.get("fontsize", None), ncols = kwargs.get("ncols", 1))
+    # TODO: Move legend to bottom center
+    # ax.legend( loc = 'upper center', bbox_to_anchor = (0.5, -0.15) )
+
     plt.savefig(get_results_dir(target, bblock, output = "plots") / "lightcurve_hess_ellipses.pdf", bbox_inches = "tight")
     plt.close()
 

@@ -10,6 +10,7 @@ import  numpy                   as      np
 import  astropy.units           as      u
 
 from    xml.etree               import  ElementTree     as  ET
+from    dataclasses             import  dataclass, field
 from    astropy.coordinates     import  SkyCoord
 
 from    gammapy.modeling        import  Parameters
@@ -26,7 +27,7 @@ from    gammapy.modeling.models import (PowerLawSpectralModel,
                                         Models, Model,
                                         create_fermi_isotropic_diffuse_model,)
 
-from    alpsup.paths            import  FERMIPY_DATA_DIR, SOURCES_FILE, get_results_dir
+from    alpsup.paths            import  FERMIPY_DATA_DIR, SOURCES_FILE, CONFIGS_DIR, get_results_dir
 
 
 def get_source_list() -> list:
@@ -45,6 +46,59 @@ def get_source_list() -> list:
 
     # Return all parameters (sorted alphabetically)
     return sorted(sources)
+
+
+def get_hess_config(target: str, 
+                    default_dataset = "HAP-HD",
+                    default_config = "std_ImPACT_hybrid_fullEnclosure_updated") -> tuple[str, str]:
+    """
+    Look up (hap_dataset, hap_config) for a source from configs/hess_config.yaml,
+    falling back to defaults if the file or the source entry doesn't exist yet.
+    """
+
+    path = CONFIGS_DIR / "hess_config.yaml"
+    if not path.exists():
+        return default_dataset, default_config
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    entry = data.get(target, {})
+    return entry.get("hap_dataset", default_dataset), entry.get("hap_config", default_config)
+
+
+def has_fermi_data(target):
+    with open(SOURCES_FILE) as f:
+        data = yaml.safe_load(f) or {}
+    inst = data["sources"][target]["inst"]
+    if "Fermi-LAT" in inst:
+        return True
+    else:
+        return False
+
+
+def get_fermi_source_list() -> list[str]:
+    """Sources with Fermi-LAT in their instruments list."""
+    return [s for s in get_source_list() if has_fermi_data(s)]
+
+
+def get_source_blocks(target: str) -> list[str]:
+    """Block names (block1, block2, ...) for a source, from hess_config.yaml."""
+    path = CONFIGS_DIR / "hess_config.yaml"
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    blocks = data.get(target, {}).get("blocks", {})
+    return sorted(blocks.keys(), key=lambda b: int(b.removeprefix("block")))
+
+
+@dataclass(frozen = True)
+class SourceInfo:
+    """
+    Custom data class containing information on source
+    """
+    name: str
+    name_4FGL: str
+    position: SkyCoord
+    redshift: float
+    inst: list[str] = field(default_factory=list)
 
 
 def get_source_info(target: str):
@@ -80,8 +134,15 @@ def get_source_info(target: str):
         # Get the 4FGL name of source
         target_4FGL = data["sources"][target]["target_4FGL"]
 
-    # Return all parameters
-    return target_4FGL, target_position, target_redshift
+        # Get available instruments datasets
+        target_instruments = data["sources"][target]["inst"]
+
+    # Return all source info as data class
+    return SourceInfo(
+        name = target, name_4FGL = target_4FGL,
+        position = target_position,
+        redshift = target_redshift,
+        inst = target_instruments, )
 
 
 def set_params(model, entry):
@@ -183,7 +244,8 @@ def get_fermipy_models(target, models = None, bblock = None):
     """
 
     # Get 4FGL name of target (name used in FermiPy)
-    target_4FGL, _, _ = get_source_info(target = target)
+    source = get_source_info(target = target)
+    target_4FGL = source.name_4FGL
 
     # Define the directory containing the XML file
     dir = get_results_dir(target, bblock, output = "fermi-out/final_00.xml")
@@ -236,9 +298,8 @@ def get_fermipy_models(target, models = None, bblock = None):
 
                 # Spatial model from template - MapCubeFunction (params: Normalization)
                 spatial_model = TemplateSpatialModel.read(
-                    # filename = "$FERMIPY_DATA/gll_iem_v07.fits",
                     filename = FERMIPY_DATA_DIR / "gll_iem_v07.fits",
-                    normalize = False, ).copy()
+                    normalize = False, ).copy(copy_data = True, filename = FERMIPY_DATA_DIR / "gll_iem_v07.fits", )
                 # Spectral model - PowerLawNorm
                 spectral_model = PowerLawNormSpectralModel().copy()
                 # Get best-fit parameters from FermiPy output
@@ -379,21 +440,38 @@ def met_to_mjd(time_met):
     Convert between Fermi-LAT Mission Elapsed Time (MET)
     to Modified Julian Date (MJD).
     Args:
-        time_met (`astropy.time.Time`): Time in Fermi-LAT MET
+        time_met (`astropy.time.Time`): Time in Fermi-LAT MET.
     Returns:
-        time_mjd (`astropy.time.Time`): Time in MJD
+        time_mjd (`astropy.time.Time`): Time in MJD.
     """
 
     MJDREFF = 51910
     MJDREFFI = 7.428703703703703 * (10**-4)
 
     # Convert from elapsed seconds to elapsed days
-    elapsed_days = time_met / 86400.
+    elapsed_days = time_met / 86400.0
 
     # Add the elapsed days to the refrence epoch
     time_mjd = MJDREFF + MJDREFFI + elapsed_days
 
     return time_mjd
+
+
+def mjd_to_met(time_mjd):
+    """
+    Convert Modified Julian Date (MJD) to Fermi-LAT Mission Elapsed Time (MET).
+    Args:
+        time_mjd: Time in MJD.
+    Returns:
+        time_met: Time in Fermi-LAT MET.
+    """
+    MJDREFI = 51910
+    MJDREFF = 7.428703703703703 * (10**-4)
+
+    elapsed_days = time_mjd - (MJDREFI + MJDREFF)
+    time_met = elapsed_days * 86400.0
+
+    return time_met
 
 
 def parse_kwargs(args):
@@ -516,14 +594,14 @@ def is_converged(params: Parameters, exclude_params: list = []) -> tuple[bool, s
 
 '''
 def save_output(
-        dataset: Datasets = None,   # Datasets object
-        model: Models = None,       # Models object (redundant if datasets given)
-        fluxp: None = None,         # Flux points object or table
+        dataset: Datasets = None,   # Datasets object
+        model: Models = None,       # Models object (redundant if datasets given)
+        fluxp: None = None,         # Flux points object or table
         fit: None = None,           # Fit results object
 ):
 
-    # TODO: DEPENDING ON WHAT'S GIVEN, SAVE OUTPUT FILES
-    # TODO: SAVE AS GENERAL AS POSSIBLE (ECSV, FITS) ALL FORMATS
+    # TODO: DEPENDING ON WHAT'S GIVEN, SAVE OUTPUT FILES
+    # TODO: SAVE AS GENERAL AS POSSIBLE (ECSV, FITS) ALL FORMATS
 
     return
 '''
