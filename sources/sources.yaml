@@ -7,6 +7,7 @@
 # NOTE: This file must be constructed manually. 
 # TODO: Running "sources.py" updates the information?
 
+
 sources:
 
 
@@ -25,10 +26,10 @@ sources:
     ra: 38.2025
     # Position DEC
     dec: 20.2880
-    # Exclusion regions
+    # Exclusion regions (only relevant for data reduction step)
     xcl: []
-    # Bayesian blocks (after time segmentation)
-    bblocks: None
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   1ES0347-121:
 
@@ -44,6 +45,8 @@ sources:
     dec: -11.9908
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   1ES0414+009:
 
@@ -59,6 +62,8 @@ sources:
     dec: 1.0900
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   1ES1101-232:
 
@@ -74,6 +79,8 @@ sources:
     dec: -23.4919
     # Exclusion regions
     xcl: [] 
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
   
   1ES1312-423:
 
@@ -87,8 +94,10 @@ sources:
     ra: 198.7642
     # Position DEC
     dec: -42.6139
-    # Exclusion regions (Size apparent angular size, largest dimension) 
+    # Exclusion regions (size given by apparent angular size, largest dimension) 
     xcl: [{"name": "Cen A", "ra": 201.365, "dec": -43.019, "size": 0.4283}]  
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   1RXSJ101015.9-311909:
 
@@ -104,6 +113,8 @@ sources:
     dec: -31.3193
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   H2356-309:
 
@@ -119,6 +130,8 @@ sources:
     dec: -30.6275
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["HESS"]
 
   PG1553+113:
 
@@ -134,6 +147,8 @@ sources:
     dec: 11.1901
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   PKS0447-439:
 
@@ -149,6 +164,8 @@ sources:
     dec: -43.8358
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   PKS1510-089:
 
@@ -164,6 +181,8 @@ sources:
     dec: -9.1000
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   PKS2155-304:
 
@@ -179,6 +198,8 @@ sources:
     dec: -30.2256
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["HESS"]
 
 
   # MSc Thesis New Sources
@@ -198,6 +219,8 @@ sources:
     dec: -57.5833
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   PKS0346-27:
 
@@ -213,6 +236,8 @@ sources:
     dec: -27.8215
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
   3C279:
 
@@ -228,38 +253,6 @@ sources:
     dec: -5.7887
     # Exclusion regions
     xcl: []
+    # Instruments datasets available
+    inst: ["Fermi-LAT", "HESS"]
 
-
-  # Other sources
-
-  
-  GRB180720B:
-
-    # Target name
-    target: "GRB 180720B"
-    # 4FGL Target name
-    target_4FGL: ""
-    # Redshift
-    z: 0.6530
-    # Position RA
-    ra: 0.5316
-    # Position DEC
-    dec: -2.9350
-    # Exclusion regions
-    xcl: [{"name": "Star", "ra": 0.4542, "dec": -3.0275, "size": 0.3}]
-
-  # Other sources
-  PKS0625-354:
-
-    # Target name
-    target: "PKS0625-354"
-    # 4FGL Target name
-    target_4FGL: "4FGL J0627.0-3529"
-    # Redshift
-    z: 0.056
-    # Position RA
-    ra: 96.7779
-    # Position DEC
-    dec: -35.4876
-    # Exclusion regions
-    xcl: []
