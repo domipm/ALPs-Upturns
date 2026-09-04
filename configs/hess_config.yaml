@@ -1,0 +1,161 @@
+1ES0229+200:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53259.03881
+    - 58491.81832388889
+1ES0347-121:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53694.89381
+    - 56629.918277592595
+1ES0414+009:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53646.063370185184
+    - 55485.038520648144
+1ES1101-232:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53110.759678055554
+    - 53881.75702759259
+1ES1312-423:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53110.89864796296
+    - 55389.74103222222
+1RXSJ101015.9-311909:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 54090.090627129626
+    - 55302.769851666664
+3C279:
+  hap_dataset: HAP-FITS
+  hap_config: loose_ImPACT_fullEnclosure
+  blocks:
+    block1:
+    - 58141.09428453704
+    - 58147.11083546296
+H2356-309:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53172.13363851851
+    - 53568.1316962037
+    block2:
+    - 53568.1316962037
+    - 54150.55198266204
+    block3:
+    - 54150.55198266204
+    - 55143.7756987037
+PG1553+113:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 56043.945745000005
+    - 56245.46289701389
+    block2:
+    - 56245.46289701389
+    - 58269.933652222215
+    block3:
+    - 58269.933652222215
+    - 58604.96590703703
+PKS0346-27:
+  hap_dataset: HAP-FITS
+  hap_config: loose_ImPACT_version36_fullEnclosure
+  blocks:
+    block1:
+    - 59521.93637944444
+    - 59521.97699287037
+PKS0447-439:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 55145.95995430555
+    - 55537.951730925924
+PKS0903-57:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_fullEnclosure_updated
+  blocks:
+    block1:
+    - 58951.82577972222
+    - 58953.331788796284
+    block2:
+    - 58953.331788796284
+    - 58956.83162462962
+PKS1510-089:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 57457.09742111111
+    - 57518.932073888885
+PKS2155-304:
+  hap_dataset: HAP-HD
+  hap_config: std_ImPACT_hybrid_fullEnclosure_updated
+  blocks:
+    block1:
+    - 53916.11596703704
+    - 53930.09246587963
+    block2:
+    - 53930.09246587963
+    - 53941.56654574074
+    block3:
+    - 53941.56654574074
+    - 53942.557208356484
+    block4:
+    - 53942.557208356484
+    - 53943.55492826389
+    block5:
+    - 53943.55492826389
+    - 53944.518990763885
+    block6:
+    - 53944.518990763885
+    - 53945.49662386574
+    block7:
+    - 53945.49662386574
+    - 53946.51767421296
+    block8:
+    - 53946.51767421296
+    - 53947.5587100926
+    block9:
+    - 53947.5587100926
+    - 53949.09015685185
+    block10:
+    - 53949.09015685185
+    - 53950.58783914352
+    block11:
+    - 53950.58783914352
+    - 53951.60126506944
+    block12:
+    - 53951.60126506944
+    - 53968.51545488426
+    block13:
+    - 53968.51545488426
+    - 53969.515559050924
+    block14:
+    - 53969.515559050924
+    - 53970.51084840277
+    block15:
+    - 53970.51084840277
+    - 53971.50064006944
+    block16:
+    - 53971.50064006944
+    - 53998.445425949074
+    block17:
+    - 53998.445425949074
+    - 53998.96684666666
