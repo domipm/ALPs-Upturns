@@ -29,7 +29,7 @@ selection :
   # Energy (maximum) [MeV] - Limit to 300 GeV
   emax    : 300000
   # Maximum zenith angle (reduce contamination from Earth's background)
-  zmax    : 90
+  zmax    : 100
   # Event class
   evclass : 128
   # Event type
