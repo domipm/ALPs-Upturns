@@ -12,15 +12,18 @@ import  matplotlib.pyplot       as      plt
 from    fermipy.gtanalysis      import  GTAnalysis
 from    fermipy.plotting        import  ROIPlotter
 
-from    alpsup.utils            import  parse_kwargs, get_source_info
+from    alpsup.utils            import  parse_kwargs, get_source_list, get_source_info, met_to_mjd, mjd_to_met
 from    alpsup.plots            import  plot_sed_fermipy
 from    alpsup.paths            import  REPO_ROOT, RESULTS_DIR, FLAT_DATA_DIR, FERMIPY_DATA_DIR, get_results_dir
 
 
-# TODO: USE get_results_dir() INSTEAD OF RESULST_DIR!
+# Minimum time (in MET) of Fermi-LAT data
+FERMI_TMIN_MET = 239557417
+# Minimum time (in MJD) of Fermi-LAT data
+FERMI_TMIN_MJD = met_to_mjd(FERMI_TMIN_MET)
 
 
-def gen_config(target, target_position, model = None, bblock = "baseline", **kwargs):
+def gen_config(target, target_position, bblock, model = None, **kwargs):
     """
     Generate fermi_config.yaml file for given target source with the relevant parameters.
 
@@ -34,6 +37,12 @@ def gen_config(target, target_position, model = None, bblock = "baseline", **kwa
     with open(REPO_ROOT / "configs/fermi_config.yaml", 'r') as f:
         config = yaml.safe_load(f)
 
+    # Read HESS config file
+    with open(REPO_ROOT / "configs/hess_config.yaml", 'r') as f:
+        config_hess = yaml.safe_load(f)
+
+    # TODO: USE get_results_dir() INSTEAD OF RESULTS_DIR!
+
     # Update the fields based on parameters (keep rest default)
 
     # File IO - set correct output folders (absolute path)
@@ -42,12 +51,26 @@ def gen_config(target, target_position, model = None, bblock = "baseline", **kwa
 
     # Data - set correct events and spacecraft file paths
     config["data"]["evfile"] = str( FLAT_DATA_DIR.resolve() / f"{target}/events_list.txt" )
+
     # NOTE: Use single, global spacecraft file (make sure it covers full observational period)
-    # config["data"]["scfile"] = f"$FLAT_DATA/{target}/spacecraft.fits"
+    # Alternative - use per-target spacecraft file: config["data"]["scfile"] = f"$FLAT_DATA/{target}/spacecraft.fits"
     config["data"]["scfile"] = str( FLAT_DATA_DIR.resolve() / f"spacecraft.fits" )
+
     # Selection - set correct position of the source
     config["selection"]["ra"] = float( target_position.ra.value )
     config["selection"]["dec"] = float( target_position.dec.value )
+
+    # Selection - times from HESS time segmentation config file
+    # If stable source without Fermi-LAT contemporaneous data
+    if len(config_hess[target]["blocks"]) == 1 and config_hess[target]["blocks"][bblock][0] < FERMI_TMIN_MJD:
+        # Use default time values: 2008-08-04 15:43:36 to 2022-08-04 15:43:36
+        config["selection"]["tmin"] = 239557417
+        config["selection"]["tmax"] = 681320621
+    # If multiple blocks (variable source) or available contemporaneous Fermi-LAT data
+    if len(config_hess[target]["blocks"]) > 1 or config_hess[target]["blocks"][bblock][0] > FERMI_TMIN_MJD:
+        # Use the HESS-defined time segmentation values
+        config["selection"]["tmin"] = mjd_to_met(config_hess[target]["blocks"][bblock][0])
+        config["selection"]["tmax"] = mjd_to_met(config_hess[target]["blocks"][bblock][1])
 
     # FermiPy data directory
     config["model"]["extdir"] = str( FERMIPY_DATA_DIR.resolve() )
@@ -63,12 +86,17 @@ def gen_config(target, target_position, model = None, bblock = "baseline", **kwa
 
     # Go over each additional kwarg given and update its value (leave default otherwise)
     for kkey, value in kwargs.items():
+        # Check if it was matched
+        matched = False
         # Loop over all keys in the config file
         for ckey in config:
             # Check if kwarg key is there
             if config[ckey].get(kkey) != None:
                 # Set the value of the key to the kwarg value given
                 config[ckey][kkey] = value
+                matched = True
+        if not matched:
+            print(f"Warning: keyword argument {kkey} did not match any config field! - Ignored.")
 
     # Define and create output directory if doesn't exist
     os.makedirs(name = RESULTS_DIR.resolve() / f"{target}/{bblock}/",
@@ -128,21 +156,32 @@ def plot_fermi_diagnostics(gta, resid, tsmap, psmap, target, bblock = "baseline"
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description = "Run Fermi-LAT analysis for a source using FermiPy")
+    parser = argparse.ArgumentParser(description = "Run Fermi-LAT analysis for a source using FermiPy",
+                                     formatter_class = argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("--source", required = True, help = "Source name (e.g. 1ES0347-121)")
-    parser.add_argument("--bblock", default = "baseline", 
-                        help = "Which Bayesian block to consider (for analyzing time selection blocks)")
+    parser.add_argument("-s", "--source", required = True, choices = get_source_list(),
+                        help = "Target source name for which analysis is performed.")
     
-    parser.add_argument("--model", choices = ["PowerLaw", "LogParabola"], help = "Override default model with custom choice")
+    parser.add_argument("-b", "--bblock", required = True, 
+                        help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs).")
+    
+    parser.add_argument("-m", "--model", choices = ["PowerLaw", "LogParabola"], 
+                        help = "Override default model with custom choice")
+    parser.add_argument("-a", "--analysis", choices = ["default", "target-only"], default = "default", 
+                        help = "What type of analysis to perform. If 'target_only', load ROI from directory specified by '--kwargs load-roi=folder' subdirectory and fit target only")
+    
+    parser.add_argument("-o", "--overwrite", action = argparse.BooleanOptionalAction, default = True,
+                        help = "Overwrite setup and analysis results.")
+    parser.add_argument("-p", "--plots-only", action="store_true", help = "Run only generation of plots from files")
 
-    parser.add_argument("--analysis", choices = ["default", "target-only"], default = "default", help = "What type of analysis to perform. If 'target_only', load ROI from directory specified by '--kwargs load-roi=folder' subdirectory (or default: baseline) and fit target only")
-
-    parser.add_argument("--plots-only", action="store_true", help = "Run only generation of plots from files")
     parser.add_argument("--kwargs", nargs = '*', 
                         help = "Additional keyword arguments ('key=value'). Can be used for, e.g., time selection (tmin, tmax), energy range (emin, emax)")
     
     args = parser.parse_args()
+
+
+    # TODO:
+    # PATH CONSISTENCY (get_results_dir)
 
     # Get the name of target source
     target = args.source
@@ -152,12 +191,17 @@ if __name__ == "__main__":
     if args.kwargs:
         kwargs = parse_kwargs(args.kwargs)
 
-    # Load the parameters of the target source from the sources.yaml file (don't need redshift)
-    target_4FGL, target_position, _ = get_source_info(target = target)
+    # Load the parameters of the target source from the sources.yaml file
+    source = get_source_info(target = target)
+    target_4FGL, target_position, target_instruments = source.name_4FGL, source.position, source.inst
 
-    # Make sure directory exists
-    os.makedirs(RESULTS_DIR / f"{target}/{args.bblock}/fermi-out/", exist_ok = True)
-    os.makedirs(RESULTS_DIR / f"{target}/{args.bblock}/plots/", exist_ok = True)
+    # Check Fermi-LAT data available for target source
+    if "Fermi-LAT" not in target_instruments:
+        raise Warning(f"No Fermi-LAT data available for {target}! Cannot run FermiPy analysis.")
+
+    # Define directories
+    dir_fout = get_results_dir(source = target, bblock = args.bblock, output = "fermi-out")
+    dif_pout = get_results_dir(source = target, bblock = args.bblock, output = "plots")
 
     # Run only the plotting function
     if args.plots_only:
@@ -171,10 +215,11 @@ if __name__ == "__main__":
         args.model = "PowerLaw"
 
     # Generate the config file (modify with given arguments and, when missing, use default settings)
-    gen_config(target, target_position, args.model, bblock = args.bblock, **kwargs)
+    gen_config(target, target_position, model = args.model, bblock = args.bblock, **kwargs)
 
     # Initialize FermiPy setup
-    gta = GTAnalysis( str( RESULTS_DIR / f"{target}/{args.bblock}/fermi_config.yaml" ), logging = {'verbosity': 3})
+    gta = GTAnalysis( 
+        str( RESULTS_DIR / f"{target}/{args.bblock}/fermi_config.yaml" ), logging = {'verbosity': 3})
     gta.setup(overwrite = False)
 
     # Generate PSF and DRM files for GammaPy analysis
@@ -240,7 +285,7 @@ if __name__ == "__main__":
     elif (args.analysis == "target-only"):
 
         # Load roi from file (baseline subfolder)
-        gta.load_roi( get_results_dir(target, kwargs.get('load-roi', 'baseline'), output = "fermi-out").joinpath("final.fits") )
+        gta.load_roi( get_results_dir(target, kwargs.get('load-roi', 'baseline'), output = "fermi-out") / "final.fits" )
 
         # Freeze all parameters
         gta.free_sources(free = False)
@@ -265,8 +310,8 @@ if __name__ == "__main__":
                       write_fits = True, write_npy = True, make_plots = True, )
     # Compute PS map
     psmap = gta.psmap(prefix = "final_ps",
-                      cmap = get_results_dir(target, args.bblock, output = "fermi-out").joinpath("ccube_00.fits"),
-                      mmap = get_results_dir(target, args.bblock, output = "fermi-out").joinpath("mcube_final_00.fits"),
+                      cmap = get_results_dir(target, args.bblock, output = "fermi-out") / "ccube_00.fits",
+                      mmap = get_results_dir(target, args.bblock, output = "fermi-out") / "mcube_final_00.fits",
                       nbinloge = 14,
                       write_fits = True, make_plots = True,
                       emin = 1000, emax = 300000, )

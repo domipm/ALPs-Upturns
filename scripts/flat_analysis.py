@@ -129,7 +129,10 @@ if __name__ == "__main__":
     # Get the name of target source
     target = args.source
     # Get target info from config file
-    target_4FGL, target_position, target_redshift = get_source_info(target)
+    source = get_source_info(target)
+    target_4FGL = source.name_4FGL 
+    target_position = source.position
+    target_redshift = source.redshift
 
     # Generate and check directories
     # gen_dirs(target, bblock = args.bblock)

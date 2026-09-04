@@ -73,7 +73,10 @@ if __name__ == "__main__":
         kwargs = parse_kwargs(args.kwargs)
 
     # Get info of source
-    target_4FGL, target_position, target_redshift = get_source_info(target)
+    source = get_source_info(target)
+    target_4FGL = source.name_4FGL
+    target_position = source.position
+    target_redshift = source.redshift
 
     # Define output directories
     dir_gout = get_results_dir(source = target, bblock = args.bblock, ebl = args.ebl, output = "gamma-out")
