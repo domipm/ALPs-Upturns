@@ -56,6 +56,54 @@ def default_plot_kwargs(inst = None, **kwargs):
     return kwargs
 
 
+def compute_robust_ylim(target, bblock, ebl, instruments = ("joint_hess", "joint_flat"),
+                        lower_pct = 1, upper_pct = 99, pad_dex = 0.75):
+    """
+    Robust y-limits from actual flux-point data, ignoring extreme outliers.
+    """
+
+    base_path = get_results_dir(target, bblock, ebl, output="gamma-out")
+    values = []
+    for inst in instruments:
+        path = base_path / f"{inst}_fluxp.ecsv"
+        if not path.exists():
+            continue
+        fluxp = ascii.read(path)
+
+        mask_ul = (
+            # Consider values where e2dnde is finite and positive
+            np.isfinite(fluxp["e2dnde"]) & (fluxp["e2dnde"] > 0)
+            # and upper limits
+            & (~fluxp["is_ul"])
+            # and not nan values
+            & (~np.isnan(fluxp["e2dnde_ul"])) )
+
+        vals_detection = fluxp["e2dnde"][mask_ul]
+        vals_ul = fluxp["e2dnde_ul"][fluxp["is_ul"]]
+        vals_ul = vals_ul[~np.isnan(vals_ul)]
+        # Aditionally, filter UL values so we don't have negative values
+        vals_ul = [val for val in vals_ul if val > 0]
+
+        # Combine array of values
+        vals = np.concatenate([vals_detection, vals_ul])
+
+        # Final check: compute median of data, and reject outliers beyond threshold
+        vals_median = np.median(vals)
+        vals = [ val for val in vals if np.abs(np.log10(val) - np.log10(vals_median)) < 1e2 ]
+
+        # Combina final array of values
+        values.extend(vals.value if hasattr(vals, "value") else vals)
+
+    if not values:
+        # Use default y-lims
+        return None
+
+    values = np.array(values)
+    ymin, ymax = np.percentile(values, [lower_pct, upper_pct])
+    # Pad in log space (dex)
+    return ymin * 10**(-pad_dex), ymax * 10**(+pad_dex)
+
+
 def plot_sed_fermipy(target: str, bblock: str = "baseline", 
                      ax: Optional[plt.Axes] = None, save_plot: bool = True, **kwargs_plot) -> plt.Axes:
     """
@@ -182,7 +230,10 @@ def plot_sed_gammapy(target: str, bblock: str = "baseline", ebl: str = None,
     for instrument in instruments:
 
         # Load flux points for instrument
-        fluxp = ascii.read(base_path / f"{instrument}_fluxp.ecsv")
+        try:
+            fluxp = ascii.read(base_path / f"{instrument}_fluxp.ecsv")
+        except:
+            continue
 
         # Extract flux point data
         fp_data = {
@@ -352,7 +403,16 @@ def plot_sed_joint(target: str, bblock: str = "baseline", ebl: str | None = "dom
         fig, ax = plt.subplots()
         # Set limits on x-axis (based on energy range [1 GeV, 31.6 TeV])
         ax.set_xlim(kwargs.get("xmin", 1e-03 - 0.25 * 1e-03), kwargs.get("xmax", 3.16e+01))
-        ax.set_ylim(kwargs.get("ymin", 1e-16), kwargs.get("ymax", 1e-10))
+        # ax.set_ylim(kwargs.get("ymin", 1e-16), kwargs.get("ymax", 1e-10))
+        # If y limits given in kwargs
+        if "ymin" in kwargs or "ymax" in kwargs:
+            ax.set_ylim(kwargs.get("ymin", 1e-16), kwargs.get("ymax", 1e-10))
+        # Compute y-axis limits based on available data!
+        else:
+            ylim = compute_robust_ylim(target, bblock, ebl)
+            # If None, use default values
+            ax.set_ylim(ylim if ylim is not None else (1e-16, 1e-10))
+
     # Define scale of axis
     ax.set_xscale('log')
     ax.set_yscale('log') 
@@ -360,10 +420,12 @@ def plot_sed_joint(target: str, bblock: str = "baseline", ebl: str | None = "dom
     ax.xaxis.set_units(u.Unit("TeV"))
     ax.yaxis.set_units(u.Unit("TeV / (s cm2)"))
 
+    # TODO: Re-compute y-axis limits, sometimes they are off!
+
     # Plot joint model
+    # TODO: If HESS-only, set correct x limits!
     plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint", ax = ax, plot_model = True, plot_fluxp = False, save_plot = False, color = "black")
     # Plot gammapy sed, no save (always for Fermi-LAT, since no HESS comparison)
-    # TODO: CHECK IF FERMI-LAT IS AVAILABLE FOR THIS SOURCE!
     try:
         plot_sed_gammapy(target = target, bblock = bblock, ebl = ebl, inst = "joint_flat", ax = ax, plot_model= False, save_plot = False)
     except:
