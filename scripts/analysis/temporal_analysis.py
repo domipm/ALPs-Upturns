@@ -215,21 +215,6 @@ def time_resolved_spectroscopy(datasets: Datasets, table: Table, use_edec: bool 
     return table, results
 
 
-def get_bayesian_blocks():
-    """
-    Compute Bayesian blocks ...
-    """
-
-    return
-
-
-def fit_with_decorrelation():
-    "..."
-
-    return
-
-
-
 if __name__ == "__main__":
 
     # ========================= #
@@ -249,7 +234,7 @@ if __name__ == "__main__":
                     help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs)")
 
     parser.add_argument("--binning", default = "night_times", choices = ["night_times", "night_bins", "obs_times"], help = "Which time-binning to use.")
-    parser.add_argument("--use-edec", action = argparse.BooleanOptionalAction, default = True)
+    parser.add_argument("--use-edec", action = argparse.BooleanOptionalAction, default = True, help = "Compute and use decorrelation energy for each fit.")
     parser.add_argument("--recon-lc", action = "store_true", help = "Reconstruct light curve instead of computing average value.")
     parser.add_argument("--sigma-overlap", type = float, default = 3, help = "At which sigma confidence interval to consider overlapping ellipses")
 
@@ -592,6 +577,11 @@ if __name__ == "__main__":
     else:
         bblocks_index = [ lc_flux_tab["time_min"][0], lc_flux_tab["time_max"][-1] ]
     log.info("Bayesian blocks on index done!")
+
+    #  Extend beginning of first block to include full time interval
+    bblocks_index[0] = sorted(dataset_obs.gti.time_start)[0].mjd
+    # Extend end of last block to include full time interval
+    bblocks_index[-1] = sorted(dataset_obs.gti.time_start)[-1].mjd
     
     # Define time intervals for Bayesian blocks on index
     t_edges_bb_index = Time(bblocks_index, format = "mjd")
@@ -832,7 +822,7 @@ if __name__ == "__main__":
     data[target]["hap_config"] = args.config
     # Save time block segmentation
     data[target]["blocks"] = {
-        f"block{i+1}": [float(row["time_min"]), float(row["time_max"])]
+        f"block{i+1}": {"tmin": float(row["time_min"]), "tmax": float(row["time_max"])}
         for i, row in enumerate(bblock_table) }
     # Save all info to file
     with open(CONFIGS_DIR / "hess_config.yaml", "w") as f:
