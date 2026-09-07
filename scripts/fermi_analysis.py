@@ -62,15 +62,15 @@ def gen_config(target, target_position, bblock, model = None, **kwargs):
 
     # Selection - times from HESS time segmentation config file
     # If stable source without Fermi-LAT contemporaneous data
-    if len(config_hess[target]["blocks"]) == 1 and config_hess[target]["blocks"][bblock][0] < FERMI_TMIN_MJD:
+    if len(config_hess[target]["blocks"]) == 1 and config_hess[target]["blocks"][bblock]["tmin"] < FERMI_TMIN_MJD:
         # Use default time values: 2008-08-04 15:43:36 to 2022-08-04 15:43:36
         config["selection"]["tmin"] = 239557417
         config["selection"]["tmax"] = 681320621
     # If multiple blocks (variable source) or available contemporaneous Fermi-LAT data
-    if len(config_hess[target]["blocks"]) > 1 or config_hess[target]["blocks"][bblock][0] > FERMI_TMIN_MJD:
+    if len(config_hess[target]["blocks"]) > 1 or config_hess[target]["blocks"][bblock]["tmin"] > FERMI_TMIN_MJD:
         # Use the HESS-defined time segmentation values
-        config["selection"]["tmin"] = mjd_to_met(config_hess[target]["blocks"][bblock][0])
-        config["selection"]["tmax"] = mjd_to_met(config_hess[target]["blocks"][bblock][1])
+        config["selection"]["tmin"] = mjd_to_met(config_hess[target]["blocks"][bblock]["tmin"])
+        config["selection"]["tmax"] = mjd_to_met(config_hess[target]["blocks"][bblock]["tmax"])
 
     # FermiPy data directory
     config["model"]["extdir"] = str( FERMIPY_DATA_DIR.resolve() )
