@@ -5,7 +5,6 @@ set -e
 set -u
 
 declare -a ALL_SOURCES
-# ALL_SOURCES=("1ES0229+200" "1ES0347-121" "1ES0414+009" "1ES1101-232" "1ES1312-423" "1RXSJ101015.9-311909" "3C279" "GRB180720B" "H2356-309" "PG1553+113" "PKS0346-27" "PKS0447-439" "PKS0903-57" "PKS1510-089" "PKS2155-304")
 ALL_SOURCES=$(python -c "from alpsup.utils import get_source_list; print('\n'.join(get_source_list()))")
 
 declare -A SOURCE_BLOCKS
