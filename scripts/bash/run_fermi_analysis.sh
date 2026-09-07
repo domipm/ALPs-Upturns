@@ -3,16 +3,19 @@ echo "Running under bash $BASH_VERSION"
 
 set -e
 
-ALL_SOURCES=($(python -c "from alpsup.utils import get_fermi_source_list; print('\n'.join(get_fermi_source_list()))"))
+declare -a ALL_SOURCES
+ALL_SOURCES=$(python -c "from alpsup.utils import get_source_list; print('\n'.join(get_source_list()))")
+
+# TODO: JUST ONE BLOCK ALWAYS?
 
 declare -A SOURCE_BLOCKS
 for src in "${ALL_SOURCES[@]}"; do
     SOURCE_BLOCKS[$src]="1"
 done
 
-CONDA_ENV="alps-upturns-fermipy"
-SCRIPT_DIR="scripts/"
-SCRIPT="fermi_analysis.py"
+CONDA_ENV="alps-upturns"
+SCRIPT_DIR="scripts/analysis"
+SCRIPT="spectral_analysis.py"
 SOURCES=()
 BLOCK_OVERRIDE=""
 DRY_RUN=false
