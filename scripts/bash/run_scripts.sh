@@ -17,7 +17,7 @@ for src in "${ALL_SOURCES[@]}"; do
     # By default, single block
     SOURCE_BLOCKS[$src]="1"
     # By default, H.E.S.S. + Fermi-LAT dataset
-    SOURCE_DATASETS[$src]="joint"
+    SOURCE_DATASETS[$src]="hess"
 done
 
 # Set Bayesian blocks (wherever not just one)
@@ -36,7 +36,7 @@ ALL_EBL_MODELS=("dominguez" "franceschini" "finke" "saldana-lopez")
 # Name of conda environment
 CONDA_ENV="alps-upturns"
 # Directory location of scripts
-SCRIPT_DIR="/path/to/ALPs-Upturns/scripts"
+SCRIPT_DIR="scripts/analysis"
 
 # Default options
 SCRIPT="model_upturns.py"
@@ -64,6 +64,7 @@ Options:
   -b, --block BLOCK         Block override, e.g. "block2". Default: all blocks
                             defined for that source.
   -n, --dry-run             Print the commands instead of running them.
+  -p, --plots-only          Generate only plots. Default: false
   -l, --list                List known sources (and their blocks/datasets) and exit.
   -h, --help                Show this help.
   -k, --kwargs              Keyword arguments for selected script.
@@ -95,15 +96,16 @@ list_sources() {
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -s|--script)   SCRIPT="$2"; shift 2 ;;
-    -o|--source)   SOURCES+=("$2"); shift 2 ;;
-    -e|--ebl)      EBL_MODELS+=("$2"); shift 2 ;;
-    -d|--dataset)  DATASET_OVERRIDE="$2"; shift 2 ;;
-    -b|--block)    BLOCK_OVERRIDE="${2#block}"; shift 2 ;;  # strip leading "block" if given
-    -n|--dry-run)  DRY_RUN=true; shift ;;
-    -l|--list)     list_sources; exit 0 ;;
-    -h|--help)     usage; exit 0 ;;
-    -k|--kwargs)   shift; EXTRA_ARGS=("$@"); break ;;
+    -s|--script)      SCRIPT="$2"; shift 2 ;;
+    -o|--source)      SOURCES+=("$2"); shift 2 ;;
+    -e|--ebl)         EBL_MODELS+=("$2"); shift 2 ;;
+    -d|--dataset)     DATASET_OVERRIDE="$2"; shift 2 ;;
+    -b|--block)       BLOCK_OVERRIDE="${2#block}"; shift 2 ;;  # strip leading "block" if given
+    -n|--dry-run)     DRY_RUN=true; shift ;;
+    -p|--plots-only)  PLOTS_ONLY=false; shift;;
+    -l|--list)        list_sources; exit 0 ;;
+    -h|--help)        usage; exit 0 ;;
+    -k|--kwargs)      shift; EXTRA_ARGS=("$@"); break ;;
     *)             echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
@@ -172,6 +174,9 @@ for src in "${SOURCES[@]}"; do
     for b in $blocks; do
       bblock="block${b}-${ebl}"
       for dataset in $datasets; do
+        # if $PLOTS_ONLY; then
+        # else
+        # fi
         cmd=(python "$SCRIPT" --source "$src" --bblock "$bblock" --ebl "$ebl" \
              --plots-only --dataset "$dataset" "${EXTRA_ARGS[@]}")
         if $DRY_RUN; then
@@ -185,4 +190,4 @@ for src in "${SOURCES[@]}"; do
   done
 done
 
-echo -e "\033[0;31mDone! :)\033[0m"
+echo -e "\033[0;32mDone! :)\033[0m"
