@@ -1,4 +1,5 @@
 import  os
+import  yaml
 import  warnings
 
 import  astropy.units       as      u
@@ -10,7 +11,7 @@ from    gammapy.datasets        import  SpectrumDatasetOnOff, Datasets, FermipyD
 from    gammapy.modeling.models import  Models
 from    gammapy.irf             import  EDispKernelMap
 
-from    alpsup.paths            import  get_hess_data_dir, get_results_dir
+from    alpsup.paths            import  get_hess_data_dir, get_results_dir, CONFIGS_DIR
 from    alpsup.utils            import  get_fermipy_models
 
 
@@ -31,6 +32,11 @@ def get_hess_dataset(target: str,
 
     # Load dataset from folder
     path = get_hess_data_dir(target, hap_dataset = dataset.lower(), hap_config = config)
+
+    # NOTE: Check if this path even exists, if not, raise exception!
+    # If this check is not performed, code just keeps going and fails at loads no files
+    if not os.path.exists(path):
+        raise Exception(f"HESS data path does not exist for source {target}, HAP dataset {dataset}, and HAP config {config}!")
 
     # Get all fits files
     obs_rmfs  = list(path.glob('*rmf.fits'))
@@ -56,7 +62,12 @@ def get_hess_dataset(target: str,
     else:
         # If bblock specified, attempt to read from file
         if bblock is not None:
-            pass
+            with open(CONFIGS_DIR / "hess_config.yaml", "r") as f:
+                hess_block_times = yaml.safe_load(f)[target]["blocks"][bblock]
+            dataset_obs = dataset_obs.select_time(
+                atol = time_select_atol,
+                time_min = Time( hess_block_times["tmin"], format = "mjd" ),
+                time_max = Time( hess_block_times["tmax"], format = "mjd", ) )
         # Otherwise, default to GTIs of the dataset
         else: 
             dataset_obs = dataset_obs.select_time(
@@ -158,21 +169,4 @@ def get_flat_dataset(target: str,
         dataset_flat.models["Isotropic"].parameters["norm"].frozen = False
             
     return dataset_flat
-
-
-def set_dataset_model(dataset, target):
-
-    model_target = None
-
-    # If no model given, read from Fermi-LAT analysis
-
-    # If model given, select
-
-    # If spatial model given, set
-
-    # Freeze parameters
-
-    # Convert parameters if required
-
-    return
 

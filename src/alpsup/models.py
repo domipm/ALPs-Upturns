@@ -541,6 +541,10 @@ class CompositeSpectralModel(SpectralModel):
     @property
     def upturn_model(self):
         return self._upturn_model
+
+    @upturn_model.setter
+    def upturn_model(self, value):
+        self._upturn_model = value
     
     @property
     def parameters(self):
@@ -649,7 +653,7 @@ class CompositeSpectralModel(SpectralModel):
         try:
             upturn_data = data["spectral"].pop('upturn_model')["spectral"]
             upturn_tag = upturn_data["spectral"].get('type')
-            upturn_model_cls = SPECTRAL_MODEL_REGISTRY.get_cls(upturn_data)
+            upturn_model_cls = SPECTRAL_MODEL_REGISTRY.get_cls(upturn_tag)
             upturn_model = upturn_model_cls.from_dict(upturn_data)
         except:
             upturn_model = None
@@ -667,11 +671,13 @@ class CompositeSpectralModel(SpectralModel):
         # Return final version of model with all parameters
         return model
 
-    def to_dict(self, full_output = False):
+    def to_dict(self, full_output = True):
         """Serialize model to dictionary with all components"""
 
+        # NOTE: 'full_output = True' required for LogParabola (for some internal GammaPy-reason)
+
         # Call original function to generate dictionary
-        data = super().to_dict(full_output = full_output)
+        data = super().to_dict(full_output = True)
 
         # Add intrinsic model information
         data["spectral"]["intrinsic_model"] = self._intrinsic_model.to_dict(full_output = full_output)

@@ -13,7 +13,8 @@ from    xml.etree               import  ElementTree     as  ET
 from    dataclasses             import  dataclass, field
 from    astropy.coordinates     import  SkyCoord
 
-from    gammapy.modeling        import  Parameters
+from    gammapy.datasets        import  Dataset
+from    gammapy.modeling        import  Parameters, Fit
 from    gammapy.modeling.models import (PowerLawSpectralModel, 
                                         PowerLawNormSpectralModel,
                                         ExpCutoffPowerLawSpectralModel,
@@ -46,6 +47,28 @@ def get_source_list() -> list:
 
     # Return all parameters (sorted alphabetically)
     return sorted(sources)
+
+
+def get_source_nblocks() -> list:
+    """
+    Get number of the blocks available for all sources (as defined in `sources.yaml` file)
+    Returns:
+        sources (list): List of all sources names.
+    """
+
+    # Open sources file
+    with open(CONFIGS_DIR / "hess_config.yaml", 'r') as f:
+        # Load the yaml file
+        data = yaml.full_load(f)
+        # Get the name of all sources
+        sources = get_source_list()
+    # List of number of blocks per source
+    nblocks = []
+    for source in sources:
+        nblocks.append( str( len(data[source]["blocks"]) ) )
+
+    # Return all parameters
+    return nblocks
 
 
 def get_hess_config(target: str, 
@@ -511,7 +534,7 @@ def parse_kwargs(args):
 
 def get_edec(model: Model) -> u.Quantity:
     """
-    Compute decorrelation energy for a model from covariance of parameters.
+    Compute decorrelation energy for a model from covariance of parameters, assuming a simple PowerLaw model.
 
     Parameters
     ----------

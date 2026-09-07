@@ -35,7 +35,8 @@ def init_log(target: str,
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[
                 logging.FileHandler(filename = str(dir_log.resolve()) + f"/{fname}", mode = "a"), 
-                logging.StreamHandler(sys.stdout)], )
+                logging.StreamHandler(sys.stdout)], 
+        force = True, )
     log = logging.getLogger(__name__)
 
     # Return logger object
