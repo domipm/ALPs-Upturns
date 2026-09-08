@@ -140,11 +140,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "Run HESS analysis for a source using GammaPy",
                                      formatter_class = argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("--source", choices = [*get_source_list(), "ALL"], help = "Source name. If 'ALL', run for all sources.")    
+    parser.add_argument("--source", choices = [*get_source_list()], help = "Source name.")    
     
     # Simulation parameters
     parser.add_argument("--nsim", default = 100, type = int, help = "Number of simulations to perform.")
-    parser.add_argument("--ebl", choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez", "ALL"], default = "dominguez", type = str, help = "EBL absorption model to use (loaded from EBLTable). If 'ALL', run for all EBL models.")
+    parser.add_argument("--ebl", choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez"], default = "dominguez", type = str, help = "EBL absorption model to use (loaded from EBLTable).")
     parser.add_argument("--seed", default = 42, type = int, help = "Random seed")
     # ALP parameters
     parser.add_argument("--malp", default = MALP, type = float, help = "ALP mass in neV.")
@@ -174,171 +174,160 @@ if __name__ == "__main__":
     if args.kwargs:
         kwargs = parse_kwargs(args.kwargs)
 
-    # Run single target or all
-    if target == "ALL" or target == None:
-        sources = get_source_list()
-    else:
-        sources = [target]
-
     # Run plots only
     if args.plots_only:
         if target == "ALL" or args.ebl == "ALL":
             raise Exception("For plotting only, a single source / EBL model must be specified!")
         plot_alp_fit(target, args.ebl, n_iter = args.plot_iter, n_galp = args.plot_galp)
         exit()
-  
-    # Loop over all sources
-    for target in sources:
 
-        # Initialize logging, per target source
-        log = init_log(target = target, fname = "alps_sim.log", bblock = "alps")
-        log.info(f"ALP Simulation for {target}...")
+    # Initialize logging, per target source
+    # TODO: FIX LOGGING (ALTHOUGH MAYBE NOT REALLY NEEDED?)
+    # log = init_log(target = target, fname = "alps_sim.log", bblock = "alps")
+    # log.info(f"ALP Simulation for {target}...")
+    print(f"ALP Simulation for {target}...")
 
-        # Get info of source
-        source = get_source_info(target)
-        target_4FGL, target_position, target_redshift = source.name_4FGL, source.position, source.redshift
+    # Get info of source
+    source = get_source_info(target)
+    target_4FGL, target_position, target_redshift = source.name_4FGL, source.position, source.redshift
 
-        # Define output directories saved to "alps" subfolder of target
-        dir_aout = get_results_dir(target, output = "alps")
-        # Create directories if not found
-        os.makedirs(name = dir_aout, exist_ok = True)
+    # Define output directories saved to "alps" subfolder of target
+    dir_aout = get_results_dir(target, output = "alps")
+    # Create directories if not found
+    os.makedirs(name = dir_aout, exist_ok = True)
 
-        # ALP mass [neV]
-        m_alp = args.malp
-        # Magnetic field
-        B0 = args.B0
+    # ALP mass [neV]
+    m_alp = args.malp
+    # Magnetic field
+    B0 = args.B0
 
-        # Define EBL models to loop over
-        if args.ebl == "ALL":
-             ebls = ["dominguez", "finke2022", "franceschini", "saldana-lopez"]
-        else:
-             ebls = [args.ebl]
-        # Loop over all EBL models (or just one)
-        for ebl in ebls:
+    # Set up simulation
 
-            log.info(f'EBL model: {ebl}')
+    # Define source for gammaALPs
+    src = Source(z = target_redshift, 
+                ra = target_position.ra.value, dec = target_position.dec.value, )
 
-            # Set up simulation
+    # EBL Model
+    ebl_model = args.ebl
 
-            # Define source for gammaALPs
-            src = Source(z = target_redshift, 
-                        ra = target_position.ra.value, dec = target_position.dec.value, )
+    # Define output directory and ensure it exists
+    dir_aout_ebl = dir_aout.resolve() / f"{ebl_model}/"
+    os.makedirs(dir_aout_ebl, exist_ok = True)
+    # Save simulation metadata for reference
+    save_alp_metadata(dir_aout_ebl, target, ebl_model, args)
 
-            # EBL Model
-            ebl_model = ebl
+    # Energy range
+    EGeV = np.logspace(kwargs.get('emin', 1.0), kwargs.get('emax', 4.5), kwargs.get('enum', 200))
+    pin  = np.diag( (1., 1., 0.) ) * 0.5
 
-            # Define output directory and ensure it exists
-            dir_aout_ebl = dir_aout.resolve() / f"{ebl_model}/"
-            os.makedirs(dir_aout_ebl, exist_ok = True)
-            # Save simulation metadata for reference
-            save_alp_metadata(dir_aout_ebl, target, ebl_model, args)
+    # Loop over all given ALP couplings [GeV-1]
+    for j, g_alp in enumerate(args.galp):
 
-            # Energy range
-            EGeV = np.logspace(kwargs.get('emin', 1.0), kwargs.get('emax', 4.5), kwargs.get('enum', 200))
-            pin  = np.diag( (1., 1., 0.) ) * 0.5
+        # log.info(f"Running simulation for m_a = {m_alp} [neV], g_ag = {g_alp} [GeV-1]")
+        print(f"Running simulation for m_a = {m_alp} [neV], g_ag = {g_alp} [GeV-1]")
 
-            # Loop over all given ALP couplings [GeV-1]
-            for j, g_alp in enumerate(args.galp):
+        # Initialize ALP parameters
+        ml = ModuleList(ALP(m = m_alp, g = g_alp), src, pin = pin, EGeV = EGeV, seed = args.seed)
 
-                log.info(f"Running simulation for m_a = {m_alp} [neV], g_ag = {g_alp} [GeV-1]")
+        # Define propagation simulation
 
-                # Initialize ALP parameters
-                ml = ModuleList(ALP(m = m_alp, g = g_alp), src, pin = pin, EGeV = EGeV, seed = args.seed)
+        # IGMF - Photon -> ALP at Extragalactic
+        ml.add_propagation(
+            environ = "IGMF",
+            order = 0,
+            nsim = args.nsim,
+            B0 = args.B0,
+            n0 = args.n0,
+            L0 = args.L0,
+            ebl_model = ebl_model, )
+        
+        # GMF - ALP -> Photon at Milky Way
+        ml.add_propagation(
+            environ = "GMF",
+            order = 1,
+            model = args.gmf, )
+        
+        # Define optical depth from EBL absorption
+        tau = ml.modules["IGMFCell"].t.opt_depth(ml.source.z, ml.EGeV / 1e3)
 
-                # Define propagation simulation
+        # Run ALPs Case
+        px, py, pa = ml.run()
 
-                # IGMF - Photon -> ALP at Extragalactic
-                ml.add_propagation(
-                    environ = "IGMF",
-                    order = 0,
-                    nsim = args.nsim,
-                    B0 = args.B0,
-                    n0 = args.n0,
-                    L0 = args.L0,
-                    ebl_model = ebl_model, )
-                
-                # GMF - ALP -> Photon at Milky Way
-                ml.add_propagation(
-                    environ = "GMF",
-                    order = 1,
-                    model = args.gmf, )
-                
-                # Define optical depth from EBL absorption
-                tau = ml.modules["IGMFCell"].t.opt_depth(ml.source.z, ml.EGeV / 1e3)
+        # Create Pgg array
+        pgg = px + py
 
-                # Run ALPs Case
-                px, py, pa = ml.run()
+        # Perform a fit on the Pgg vs E curve
+        E_b_min = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 1)
+        # E_b_max = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 5)
+        E_b_max = 31.6 * 1e3
 
-                # Create Pgg array
-                pgg = px + py
+        p0 = [ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 2), -2, -1, 1]
+        f_in = f_inner(ml.EGeV[0], *p0[:-1])
 
-                # Perform a fit on the Pgg vs E curve
-                E_b_min = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 1)
-                # E_b_max = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 5)
-                E_b_max = 31.6 * 1e3
+        # Define initial parameters
+        p0[-1] = 1 / f_in
+        # Define bounds on parameters
+        bounds = np.array([[E_b_min, E_b_max], [-5, 0], [-1.001, -0.999], [0, 0]])
 
-                p0 = [ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 2), -2, -1, 1]
-                f_in = f_inner(ml.EGeV[0], *p0[:-1])
+        # Define energy mask for fit (tau = 10)
+        E_max_fit = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 10)
 
-                # Define initial parameters
-                p0[-1] = 1 / f_in
-                # Define bounds on parameters
-                bounds = np.array([[E_b_min, E_b_max], [-5, 0], [-1.001, -0.999], [0, 0]])
+        # Define mask below E(tau=6)
+        mask = ml.EGeV < E_max_fit
 
-                # Define energy mask for fit (tau = 10)
-                E_max_fit = ml.modules["IGMFCell"].t.opt_depth_inverse(ml.source.z, 10)
+        # Run simulations
 
-                # Define mask below E(tau=6)
-                mask = ml.EGeV < E_max_fit
+        # Initialize arrays for results
+        popt_list = []
+        pcov_list = []
+        chisq_list = []
 
-                # Run simulations
+        for i, p in enumerate(pgg):
+            
+            N = p[0] * np.exp(tau[0])
+            p0[-1] = N
+            bounds[-1] = [N * 0.99, N * 1.01]
 
-                # Initialize arrays for results
-                popt_list = []
-                pcov_list = []
-                chisq_list = []
+            popt, pcov = curve_fit(
+                f = f_curve,
+                xdata = ml.EGeV[mask],
+                ydata = p[mask] * np.exp(tau[mask]),
+                p0 = p0,
+                bounds = bounds.T, 
+                # Maximum number of iterations
+                maxfev = 5000, )
+            
+            # Append to array
+            popt_list.append(popt)
+            pcov_list.append(pcov)
 
-                for i, p in enumerate(pgg):
-                    
-                    N = p[0] * np.exp(tau[0])
-                    p0[-1] = N
-                    bounds[-1] = [N * 0.99, N * 1.01]
+            # Print best fit models
+            # log.info(f"Best fit parameters (Iter. {i+1}):\n- E_brk = {popt_list[i][0] * 1e-3:.3f} TeV\n- DGamma = {popt_list[i][1]:.3f}")
+            print(f"Best fit parameters (Iter. {i+1}):\n- E_brk = {popt_list[i][0] * 1e-3:.3f} TeV\n- DGamma = {popt_list[i][1]:.3f}")
 
-                    popt, pcov = curve_fit(
-                        f = f_curve,
-                        xdata = ml.EGeV[mask],
-                        ydata = p[mask] * np.exp(tau[mask]),
-                        p0 = p0,
-                        bounds = bounds.T, 
-                        # Maximum number of iterations
-                        maxfev = 5000, )
-                    
-                    # Append to array
-                    popt_list.append(popt)
-                    pcov_list.append(pcov)
+            # Calculate chi square of the fit
+            chi_sq = np.sum( (f_curve( ml.EGeV[mask], *popt ) - p[mask] * np.exp(tau[mask]) ) ** 2 )
+            dof = ml.EGeV.size - 4
+            # NOTE: Should be mask.sum() - len(popt) ?
+            chisq_list.append(chi_sq)
+            # Check if chi squared is too large
+            if chi_sq / dof > 2:
+                # log.info(f"chi_sq/dof too large! i = {i+1}, chi_sq = {chi_sq}, chi_sq/dof = {chi_sq / dof}")
+                print(f"chi_sq/dof too large! i = {i+1}, chi_sq = {chi_sq}, chi_sq/dof = {chi_sq / dof}")
 
-                    # Print best fit models
-                    log.info(f"Best fit parameters (Iter. {i+1}):\n- E_brk = {popt_list[i][0] * 1e-3:.3f} TeV\n- DGamma = {popt_list[i][1]:.3f}")
-    
-                    # Calculate chi square of the fit
-                    chi_sq = np.sum( (f_curve( ml.EGeV[mask], *popt ) - p[mask] * np.exp(tau[mask]) ) ** 2 )
-                    dof = ml.EGeV.size - 4
-                    # NOTE: Should be mask.sum() - len(popt) ?
-                    chisq_list.append(chi_sq)
-                    # Check if chi squared is too large
-                    if chi_sq / dof > 2:
-                            log.info(f"chi_sq/dof too large! i = {i+1}, chi_sq = {chi_sq}, chi_sq/dof = {chi_sq / dof}")
+            # Save simulation results to file
+            # NOTE: Save results of all couplings for only one iteration!
+            if i == args.save_iter:
+                # log.info(f"Saving simulation results of iteration {args.save_iter} into files...")
+                print(f"Saving simulation results of iteration {args.save_iter} into files...")
+                np.savez(file = dir_aout_ebl / f"sim_iter{i}_m{m_alp:g}_g{g_alp:g}_B0{B0:g}.npz",
+                        EGeV = ml.EGeV, p = p, exp_tau = np.exp(tau))
+                # TODO: Generate diagnostic plots
 
-                    # Save simulation results to file
-                    # NOTE: Save results of all couplings for only one iteration!
-                    if i == args.save_iter:
-                        log.info(f"Saving simulation results of iteration {args.save_iter} into files...")
-                        np.savez(file = dir_aout_ebl / f"sim_iter{i}_m{m_alp:g}_g{g_alp:g}_B0{B0:g}.npz",
-                                EGeV = ml.EGeV, p = p, exp_tau = np.exp(tau))
-                        # TODO: Generate diagnostic plots
-
-                log.info(f"Saving simulation fit results into files...")
-                # Save as a single numpy file
-                np.savez(file = dir_aout_ebl / f"sim_fit_m{m_alp:g}_g{g_alp:g}_B0{B0:g}.npz", 
-                         popt = popt_list, pcov = pcov_list, chisq = chisq_list,)
-                log.info(f"Results saved!")
+        # log.info(f"Saving simulation fit results into files...")
+        print(f"Saving simulation fit results into files...")
+        # Save as a single numpy file
+        np.savez(file = dir_aout_ebl / f"sim_fit_m{m_alp:g}_g{g_alp:g}_B0{B0:g}.npz", 
+                    popt = popt_list, pcov = pcov_list, chisq = chisq_list,)
+        # log.info(f"Results saved!")
+        print(f"Results saved!")
