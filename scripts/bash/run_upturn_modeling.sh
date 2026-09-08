@@ -21,7 +21,7 @@ CONDA_ENV="alps-upturns"
 SCRIPT_DIR="scripts/analysis"
 
 # Default options
-SCRIPT="spectral_analysis.py"
+SCRIPT="upturn_modeling.py"
 SOURCES=()
 EBL_MODELS=()
 DATASET_OVERRIDE=""
