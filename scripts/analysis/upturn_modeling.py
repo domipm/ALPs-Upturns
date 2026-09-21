@@ -5,9 +5,8 @@
 
 import  os
 import  gc
+import  logging
 import  argparse
-
-from    pathlib                     import  Path
 
 import  matplotlib.pyplot           as      plt
 import  matplotlib.colors           as      clr
@@ -15,18 +14,204 @@ import  matplotlib.colors           as      clr
 import  numpy                       as      np
 import  astropy.units               as      u
 
-from    gammapy.modeling            import  Fit, Parameter
-from    gammapy.modeling.models     import  Models, SpectralModel, SkyModel
-from    gammapy.datasets            import  Datasets, FluxPointsDataset
-from    gammapy.estimators          import  FluxPointsEstimator
+from    gammapy.modeling            import  Fit
+from    gammapy.modeling.models     import  Models, SkyModel
+from    gammapy.datasets            import  Datasets
 
-from    alpsup.models   import  SmoothBrokenSpectralModel, EBLTableSpectralModel, UpturnSpectralModel, CompositeSpectralModel
-from    alpsup.utils    import  get_source_info, get_edec, get_etau, parse_kwargs
-from    alpsup.plots    import  plot_sed_gammapy
-from    alpsup.paths    import  get_results_dir
-from    alpsup.logs     import  init_log
+from    alpsup.models       import  UpturnSpectralModel, CompositeSpectralModel
+from    alpsup.utils        import  get_source_info, get_etau, parse_kwargs
+from    alpsup.plots        import  plot_sed_gammapy
+from    alpsup.paths        import  get_results_dir
+from    alpsup.logs         import  init_log
+from    alpsup.parameters   import  set_param_bounds
 
 
+# Get logger function
+log = logging.getLogger(__name__)
+
+
+# Number of re-tries to perform if fit fails
+FIT_ATTEMPTS = 10
+
+
+def setup_upturn_model(datasets: Datasets, target: str, target_redshift, ebl, tau_limit, **kwargs):
+
+    # Add spectral upturn to the model (HESS model, including bias term) 
+    datasets.models[target].spectral_model.upturn_model = UpturnSpectralModel()
+    # If Fermi-LAT present, also add it here (Fermi-LAT model, without bias term)
+    # if f"{target} Unbiased" in datasets.models.names:
+    #     datasets.models[f"{target} Unbiased"].spectral_model = datasets.models[f"{target} Unbiased"].spectral_model * datasets.models[target].spectral_model.upturn_model
+
+    models = Models()
+    for model in datasets.models:
+        if model.name != f"{target} Unbiased":
+            models.append(model)
+    models.append(
+        SkyModel(
+            name = f"{target} Unbiased", datasets_names = "Fermi-LAT",
+            spatial_model = datasets.models[target].spatial_model,
+            spectral_model = CompositeSpectralModel(
+                intrinsic_model = datasets.models[target].spectral_model.intrinsic_model,
+                ebl_model = datasets.models[target].spectral_model.ebl_model,
+                bias = 0,
+                upturn_model = datasets.models[target].spectral_model.upturn_model, ) ) )
+    models[f"{target} Unbiased"].spectral_model.parameters["bias"].frozen = True
+    datasets.models = models
+
+    # Compute energy at tau optical depth limit
+    e_tau = get_etau(target_redshift, ebl, tau_lim = tau_limit)
+
+    # Set break energy to E(tau = tau_lim)
+    datasets.models[target].parameters["e_upt"].quantity = e_tau
+    # Set index delta value to -0.1 by default
+    datasets.models[target].parameters["indexdelta_upt"].value = - 0.1
+    log.info("Datasets and models loaded!")
+
+    # Set amplitude bounds if required (sometimes needed to relax maximum)
+
+    # TODO: GLOBAL CONFIGS!
+
+    # Compute full energy bounds
+    dataset_energy_range = [None, datasets["HESS"].counts.geom.axes["energy"].edges[-1].to(u.TeV)]
+    try:
+        dataset_flat = datasets["Fermi-LAT"]
+    except:
+        dataset_flat = None
+    if dataset_flat is not None:
+        dataset_energy_range[0] = dataset_flat.counts.geom.axes["energy"].edges[0].to(u.TeV)
+    else:
+        dataset_energy_range[0] = datasets["HESS"].counts.geom.axes["energy"].edges[0].to(u.TeV)
+
+    # For SmoothBrokenPowerLaw, set Ebreak initial value and bounds!
+    # TODO: TEST THIS!
+    if datasets.models[target].spectral_model.intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
+        if kwargs.get("ebreak", None) is None:
+            kwargs["ebreak"] = float(np.sqrt(dataset_energy_range[0] * dataset_energy_range[1]).value)
+        if kwargs.get("ebreak_min", None) is None:
+            # kwargs["ebreak_min"] = float(dataset_energy_range[0].to(u.TeV).value)
+            kwargs["ebreak_min"] = 0.01
+        if kwargs.get("ebreak_max", None) is None:
+            # kwargs["ebreak_max"] = float(dataset_energy_range[1].to(u.TeV).value)
+            kwargs["ebreak_max"] = 1.00
+
+    set_param_bounds(datasets.models[target].spectral_model, bounds = "upt", **kwargs)
+
+    # Make sure upturn parameters all frozen!
+    datasets.models[target].parameters["e_upt"].frozen = True
+    datasets.models[target].parameters["beta_upt"].frozen = True
+    datasets.models[target].parameters["indexdelta_upt"].frozen = True
+
+    return
+
+
+# TODO: WORK IN PROGRESS
+def run_upturn_model(datasets, target, target_redshift, e_tau, npoints = 20, **kwargs):
+
+    # Define grid for Index2_brk = gamma2 and E_brk = ebreak2
+    ibreak_vals = np.linspace(kwargs.get("ibreak_min", -0.01), -5.00, npoints) # from 0 (no break) to -5 (sharp break) linearly spaced
+    ebreak_vals = np.logspace(np.log10( e_tau.value ), np.log10( 31.6 ), npoints) # from E(tau) to 31.6 TeV
+
+    # Generate meshgrid
+    ibreak_grid, ebreak_grid = np.meshgrid(ibreak_vals, ebreak_vals, indexing = "ij")
+    # Initialize fit-statistic grid to zero
+    cstat_grid = np.zeros_like(ibreak_grid)
+
+    # Store default parameters
+    params_org = datasets.models[target].parameters
+    # Define new (copy) dataset object
+    dataset = datasets.copy()
+
+    # Initialize new fitting object
+    fit = Fit()
+
+    # Loop over both axes in grid
+    for i, ibreak in enumerate(ibreak_vals):
+        log.info(f"*** deltaindex_brk = {ibreak:.6f} ***")
+        for j, ebreak in enumerate(ebreak_vals):
+            log.info(f"··· e_brk = {ebreak:6f} ···")
+
+            # Restore dataset parameters to original values
+            for par in dataset.models[target].parameters:
+                par.value = params_org[par.name].value
+                par.error = params_org[par.name].error
+
+            # Set break parameters from loop
+            dataset.models[target].parameters["e_upt"].value = ebreak
+            dataset.models[target].parameters["indexdelta_upt"].value = ibreak
+            # Freeze these parameters (should be frozen by now)
+            dataset.models[target].parameters["e_upt"].frozen = True
+            dataset.models[target].parameters["indexdelta_upt"].frozen = True
+            # Make sure reference is frozen just in case
+            dataset.models[target].parameters["reference"].frozen = True
+
+            # Rest of the parameters (index, amplitude, etc.) depend on intrinsic model, should be free
+
+            # NOTE: Smooth broken power law parameters
+            if "ebreak" in dataset.models[target].parameters.names:
+                dataset.models[target].parameters["ebreak"].frozen = True
+                dataset.models[target].parameters["ebreak"].min = kwargs.get("ebreak_min", 0.01)
+                # NOTE: SET SBPL EBREAK BELOW E(tau=2) SO THERE'S NO OVERLAP!
+                dataset.models[target].parameters["ebreak"].max = kwargs.get("ebreak_max", get_etau(redshift = target_redshift, ebl_model = args.ebl, tau_lim = 1))
+
+            # Attempt fit with retry
+            success = False
+            # Restart result value
+            result = None
+            # Loop over all attempts
+            for attempt in range(FIT_ATTEMPTS):
+                # Try to run fit
+                try:
+
+                    # On retries, perturb free parameters randomly
+                    if attempt > 0:
+                        for par in dataset.models[target].parameters:
+                            if not par.frozen:
+                                par.value = par.min + np.random.uniform(0.1, 0.9) * (par.max - par.min)
+
+                    result = fit.run(dataset)
+                    # Check convergence of parameters for baseline model
+                    converged, reason = is_converged([par for par in result.models[target].parameters if par.name != "bias"])
+                    if converged == True:
+                        log.info(f"Fit passed convergence test!")
+                    else:
+                        log.warning(f"Fit failed convergence test! Reason: {reason}. Retrying...")
+                        continue
+                    # If fit successful
+                    if result.success:
+                        # Print info on screen
+                        log.info(f"Fit success! Gamma2 = {ibreak:.2f}, Ebreak2 = {ebreak:.2e}, C-stat = {result.total_stat:.2f}, Beta = {dataset.models[target].parameters["beta_upt"].value:.2f}")
+                        # Print also intrinsic parameters
+                        for par in dataset.models[target].parameters:
+                            if par.frozen == False:
+                                log.info(f"\t{par.name} = {par.value:.4e} +/- {par.error:.4e}")
+                        # Add result to grid
+                        cstat_grid[i, j] = result.total_stat
+                        # Set success flag
+                        success = True
+                        # Break from for loop!
+                        break
+                    # If fit unsucessful
+                    else:
+                        log.warning(f"\tFit failed at attempt {attempt}! Retrying...")
+                # Catch exceptions
+                except Exception as e:
+                    log.error(f"\tException at fit attempt! Reason: {e}. Continuing...")
+
+            # If fit has not converged, return NaN
+            if not success:
+                cstat_grid[i, j] = np.nan
+                log.warning("Max attempts reached!")
+
+        log.info("Upturn modeling done!")
+
+        # Force python to collect garbage (memory usage)
+        gc.collect()
+
+    # Return the upturn grid and meshgrids
+    return cstat_grid, ibreak_grid, ebreak_grid
+
+
+# TODO: MAKE THIS FUNCTION GLOBAL AND ALWAYS CHECK AFTER FITTING!
 def is_converged(params):
     """
     Script to check for convergence of all parameters for a model
@@ -187,7 +372,7 @@ def plot_bestfit(target: str, bblock: str, ebl: str, dataset: str):
 
     # Plot non-upturned model to compare
     model_org.spectral_model.plot(energy_range, ax = ax, sed_type = "e2dnde", 
-                              color = "tab:blue", label = "Best-fit Model")
+                              color = "tab:blue", label = "Best-fit Model", linestyle = "--")
     model_org.spectral_model.plot_error(energy_range, ax = ax, sed_type = "e2dnde", color = "tab:blue")
 
     # Plot non-upturned flux points
@@ -196,31 +381,30 @@ def plot_bestfit(target: str, bblock: str, ebl: str, dataset: str):
                      color = "tab:blue", label = None,
                      save_plot = False)
 
-    ax.set_ylim(1e-16, 1e-10)
+    ax.set_ylim(1e-16, 1e-8)
 
     plt.legend()
     # Save plot
     plt.tight_layout()
-    plt.show()
-    exit()
     plt.savefig(dir_gout / "upturn_bestfit.png", dpi = 300, bbox_inches = "tight")
     plt.close()
 
     return
 
 
-if __name__ == "__main__":
+def main():
 
     # Arguments for script
     parser = argparse.ArgumentParser(description = "Run Fermi-LAT analysis for a source using FermiPy")
 
     parser.add_argument("--source", required = True, help = "Source name (e.g. 1ES0347-121, or all)")
 
-    parser.add_argument("--bblock", default = "baseline", 
+    parser.add_argument("--bblock", required = True, 
                     help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs)")
+    parser.add_argument("--ebl", required = True, 
+                        help = "EBL absorption model to use (loaded from EBLTable). Default: dominguez")
 
-    parser.add_argument("--ebl", default = "dominguez", help = "EBL absorption model to use (loaded from EBLTable). Default: dominguez")
-
+    # TODO: REMOVE THIS! JUST SPECTRAL, BUT KEEP OPTION FROM OLD SCRIPTS FOR HESS, FLAT, ETC
     parser.add_argument("--dataset", choices = ["hess", "hess_bias", "joint", "joint_bias"], default = None, help = "Which dataset and model to use for upturn search. Options: {'hess', 'joint'}. Default: None (select based on available instruments)")
 
     parser.add_argument("--npoints", type = int, default = 20, help = "Number of point to take for each axis in grid search (E_break and DeltaIndex_break)")
@@ -241,28 +425,21 @@ if __name__ == "__main__":
 
     # Get info on source from data class
     source = get_source_info(target)
-    target_4FGL = source.name_4FGL
-    target_position = source.position
     target_redshift = source.redshift
     target_instruments = source.inst
 
-    '''
-    # Set dataset argument (HESS or joint Fermi-LAT and HESS) based on available instruments, unless specified
-    if args.dataset is None:
-        if "HESS" in target_instruments and "Fermi-LAT" in target_instruments:
-            args.dataset = "joint"
-        if "HESS" in target_instruments and "Fermi-LAT" not in target_instruments:
-            args.dataset = "hess"
-    '''
+    # TODO: FIX THIS!
     args.dataset = "joint"
 
+    # Run only plots
     if args.plots_only:
         plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
         plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "dcstat")
         plot_bestfit(target, args.bblock, args.ebl, dataset = args.dataset)
         exit()
 
-    log = init_log(target, fname = f"model_upturns_{args.dataset}.log", bblock = args.bblock)
+    # Initialize logging functions
+    log = init_log(target, fname = f"upturn_modeling.log", bblock = args.bblock, ebl = args.ebl)
 
     # Define output directory
     dir_gout = get_results_dir(target, args.bblock, args.ebl, output = "gamma-out")
@@ -273,88 +450,49 @@ if __name__ == "__main__":
         filename = dir_gout.joinpath(f"{args.dataset}_datasets.yaml"),
         filename_models = dir_gout.joinpath(f"{args.dataset}_models.yaml"), )
     
-    # Get spectral model for target from dataset (including EBL)
-    model_dataset = datasets.models[target] # .spectral_model
-    # Check if loading biased model, if so, load only intrinsic and ebl
-    # if "bias" in datasets.models[target].parameters.names:
-        # Ignore bias parameter
-        # model_dataset = datasets.models[target].spectral_model.intrinsic_model * datasets.models[target].spectral_model.ebl_model
-        # Otherwise, also include bias parameter
-    #     model_dataset = datasets.models[target].spectral_model
+    # Add spectral upturn to the model (HESS model, including bias term) 
+    datasets.models[target].spectral_model.upturn_model = UpturnSpectralModel()
 
-    # Combine model with additional smooth break in the spectra
-    # model_spectral = model_dataset * SmoothBrokenSpectralModel()
-    # Define spatial model (same as that of datasets)
-    # model_spatial = datasets.models[target].spatial_model
-    # Define sky model for target source
-    # model_target = SkyModel(
-    #     spectral_model = model_spectral,
-    #     spatial_model = model_spatial,
-    #     name = target,
-    #     datasets_names = ["Fermi-LAT", "HESS"],)
-
-    model_dataset.spectral_model.upturn_model = UpturnSpectralModel()
-
-    # TODO: HANDLE FERMI-LAT MODEL!
-
-    '''
-    # Remove target model from Fermi-LAT dataset
+    # Define spectral model for Fermi-LAT (unbiased, with the same upturn as HESS)
     models = Models()
     for model in datasets.models:
-        # Also remove unbiased target if present
-        if model.name != target and model.name != f"{target} Unbiased":
+        if model.name != f"{target} Unbiased":
             models.append(model)
-    '''
+    models.append(
+        SkyModel(
+            name = f"{target} Unbiased", datasets_names = "Fermi-LAT",
+            spatial_model = datasets.models[target].spatial_model,
+            spectral_model = CompositeSpectralModel(
+                intrinsic_model = datasets.models[target].spectral_model.intrinsic_model,
+                ebl_model = datasets.models[target].spectral_model.ebl_model,
+                bias = 0,
+                upturn_model = datasets.models[target].spectral_model.upturn_model, ) ) )
+    models[f"{target} Unbiased"].spectral_model.parameters["bias"].frozen = True
+    datasets.models = models
 
-    # Add custom joint model to models list
-    # models.append(model_target)
-    # Add models to dataset
-    # datasets.models = models
-
-    # Compute decorrelation energy for model
-    # e_dec = get_edec(datasets.models[target])
     # Compute energy at tau optical depth limit
     e_tau = get_etau(target_redshift, args.ebl, tau_lim = args.tau_limit)
 
-    # Set reference to decorrelation energy (this should already be set! only change if not equal)
-    # if e_dec != datasets.models[target].parameters["reference"].quantity:
-    #     datasets.models[target].parameters["reference"].quantity = e_dec
     # Set break energy to E(tau = tau_lim)
     datasets.models[target].parameters["e_upt"].quantity = e_tau
     # Set index delta value to -0.1 by default
     datasets.models[target].parameters["indexdelta_upt"].value = - 0.1
     log.info("Datasets and models loaded!")
 
-    # Set amplitude bounds if required (sometimes needed to relax maximum)
-
-    # TODO: GLOBAL CONFIGS!
-
-    if "index" in datasets.models[target].parameters.names:
-        datasets.models[target].parameters["index"].max = kwargs.get("index_max", 7.5)
-    if "alpha" in datasets.models[target].parameters.names:
-        datasets.models[target].parameters["alpha"].max = kwargs.get("alpha_max", 7.5)
-    if "beta" in datasets.models[target].parameters.names:
-        datasets.models[target].parameters["beta"].max = kwargs.get("beta_max", 2.5)
-        datasets.models[target].parameters["beta"].min = kwargs.get("beta_min", 0.0)
-    datasets.models[target].parameters["amplitude"].max = kwargs.get("amplitude_max", 1e-5)
-
-    # NOTE / TODO: SMOOTH BROKEN POWER LAW PARAMETERS
-    if "ebreak" in datasets.models[target].parameters.names:
-        datasets.models[target].parameters["ebreak"].frozen = True
-    if "index1" in datasets.models[target].parameters.names:
-        datasets.models[target].parameters["index1"].min = 0.00
-        datasets.models[target].parameters["index1"].max = 5.00
-        datasets.models[target].parameters["index2"].min = 0.00
-        datasets.models[target].parameters["index2"].max = 5.00
-        datasets.models[target].parameters["ebreak"].min = 0.003 * 0.10
-        datasets.models[target].parameters["ebreak"].max = 31.60 * 10.0
-
-    # Freeze upturn parameters
-    datasets.models[target].parameters["e_upt"].frozen = True
-    datasets.models[target].parameters["indexdelta_upt"].frozen = True
-
-    # Display model to use for upturn modeling
+    # TODO: TEST THIS REFACTORING DIDN'T BREAK ANYTHING
+    # Combine spectral model with upturn and set up all parameters
+    setup_upturn_model(datasets, target, target_redshift, args.ebl, args.tau_limit, **kwargs)
     log.info(f"Model used for upturn modeling:\n{datasets.models[target].spectral_model}")
+
+
+    # TODO: FINISH REFACTORING THIS!
+    
+
+    # Run upturn modeling, and obtain fit-statistic grids
+    cstat_grid = run_upturn_model(datasets, target, target_redshift, e_tau, **kwargs)
+    plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
+
+    exit()
 
     # Define grid for Index2_brk = gamma2 and E_brk = ebreak2
     ibreak_vals = np.linspace(kwargs.get("ibreak_min", -0.01), -5.00, args.npoints) # from 0 (no break) to -5 (sharp break) linearly spaced
@@ -362,10 +500,13 @@ if __name__ == "__main__":
 
     # Generate meshgrid
     ibreak_grid, ebreak_grid = np.meshgrid(ibreak_vals, ebreak_vals, indexing = "ij")
+    # Initialize fit-statistic grid to zero
     cstat_grid = np.zeros_like(ibreak_grid)
 
-    # Create a copy of the dataset to restore to
-    dataset_org = datasets.copy()
+    # Store default parameters
+    params_org = datasets.models[target].parameters
+    # Define new (copy) dataset object
+    dataset = datasets.copy()
 
     # Initialize new fitting object
     fit = Fit()
@@ -376,48 +517,35 @@ if __name__ == "__main__":
         for j, ebreak in enumerate(ebreak_vals):
             log.info(f"··· e_brk = {ebreak:6f} ···")
 
-            # Restore dataset to original state
-            dataset = dataset_org
+            # Restore dataset parameters to original values
+            for par in dataset.models[target].parameters:
+                par.value = params_org[par.name].value
+                par.error = params_org[par.name].error
 
             # Set break parameters from loop
             dataset.models[target].parameters["e_upt"].value = ebreak
             dataset.models[target].parameters["indexdelta_upt"].value = ibreak
-            # Freeze these parameters
+            # Freeze these parameters (should be frozen by now)
             dataset.models[target].parameters["e_upt"].frozen = True
             dataset.models[target].parameters["indexdelta_upt"].frozen = True
-
-            # Rest of the parameters (index, amplitude, etc. depend on intrinsic model)
-            # are left free to vary within their default bounds
-            if "index" in datasets.models[target].parameters.names:
-                dataset.models[target].parameters["index"].frozen = False
-            elif "alpha" in datasets.models[target].parameters.names:
-                dataset.models[target].parameters["alpha"].frozen = False
-                dataset.models[target].parameters["beta"].frozen = False
-                # If beta parameter effectively zero - use equivalent power law
-                if (0 <= dataset.models[target].parameters["beta"].value <= 1e-5):
-                    dataset.models[target].parameters["beta"].frozen = True
-
-            # NOTE / TODO: SMOOTH BROKEN POWER LAW PARAMETERS
-            if "ebreak" in datasets.models[target].parameters.names:
-                dataset.models[target].parameters["ebreak"].frozen = True
-            
-            dataset.models[target].parameters["amplitude"].frozen = False
             # Make sure reference is frozen just in case
             dataset.models[target].parameters["reference"].frozen = True
 
-            # if "bias" in datasets.models[target].parameters.names:
-                # Freeze bias if present
-                # dataset.models[target].parameters["bias"].frozen = True
-                # Otherwise, leave it free
-                # dataset.models[target].parameters["bias"].frozen = False
+            # Rest of the parameters (index, amplitude, etc.) depend on intrinsic model, should be free
+
+            # NOTE: Smooth broken power law parameters
+            if "ebreak" in dataset.models[target].parameters.names:
+                dataset.models[target].parameters["ebreak"].frozen = True
+                dataset.models[target].parameters["ebreak"].min = kwargs.get("ebreak_min", 0.01)
+                # NOTE: SET SBPL EBREAK BELOW E(tau=2) SO THERE'S NO OVERLAP!
+                dataset.models[target].parameters["ebreak"].max = kwargs.get("ebreak_max", get_etau(redshift = target_redshift, ebl_model = args.ebl, tau_lim = 1))
 
             # Attempt fit with retry
-            attempts = 10
             success = False
             # Restart result value
             result = None
             # Loop over all attempts
-            for attempt in range(attempts):
+            for attempt in range(FIT_ATTEMPTS):
                 # Try to run fit
                 try:
 
@@ -464,23 +592,28 @@ if __name__ == "__main__":
         # Force python to collect garbage (memory usage)
         gc.collect()
 
-    # Get minimum C-stat and compute DeltaC-stat grid
-    min_cstat = np.nanmin(cstat_grid)
-    delta_cstat_grid = cstat_grid - min_cstat
-
     log.info(f"Saving files to {dir_gout}")
     # Save C-stat meshgrid
-    np.savez(file = dir_gout.joinpath(f"upturns_cstat_{args.dataset}"),
+    np.savez(file = dir_gout / f"upturns_cstat_{args.dataset}",
              # Save as X, Y, Z
              X = ibreak_grid, Y = ebreak_grid, Z = cstat_grid)
     # Save DeltaC-stat meshgrid
-    np.savez( file = dir_gout.joinpath(f"upturns_dcstat_{args.dataset}"),
+    np.savez(file = dir_gout / f"upturns_dcstat_{args.dataset}",
              # Save as X, Y, Z
-             X = ibreak_grid, Y = ebreak_grid, Z = delta_cstat_grid)
+             X = ibreak_grid, Y = ebreak_grid, Z = cstat_grid - np.nanmin(cstat_grid))
 
     # Generate plots
     log.info(f"Generating and saving plots...")
     plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
     plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "dcstat")
-    # TODO: Fix this function!
-    # plot_bestfit(target, args.bblock, args.ebl, dataset = args.dataset)
+    plot_bestfit(target, args.bblock, args.ebl, dataset = args.dataset)
+
+    log.info(f"Upturn modeling complete! :)")
+
+    return
+
+
+if __name__ == "__main__":
+
+    main()
+

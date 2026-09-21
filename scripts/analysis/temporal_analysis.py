@@ -12,8 +12,6 @@ import  numpy                       as      np
 import  matplotlib.pyplot           as      plt
 from    matplotlib.patches          import  Ellipse
 
-from    pathlib                     import  Path
-
 from    astropy                     import  units   as  u
 from    astropy.io                  import  ascii
 from    astropy.time                import  Time
@@ -21,11 +19,11 @@ from    astropy.table               import  Table
 from    astropy.stats               import  bayesian_blocks
 
 from    gammapy.stats               import  WStatCountsStatistic
-from    gammapy.datasets            import  Datasets, SpectrumDatasetOnOff
+from    gammapy.datasets            import  Datasets
 from    gammapy.estimators          import  LightCurveEstimator, FluxPointsEstimator
-from    gammapy.modeling            import  Fit, FitResult, OptimizeResult, CovarianceResult
+from    gammapy.modeling            import  Fit
 from    gammapy.modeling.models     import  PowerLawSpectralModel, SkyModel
-from    gammapy.maps                import  MapAxis
+
 
 from    scipy.special               import  gammaincinv
 
@@ -35,7 +33,7 @@ from    shapely.affinity            import  scale, rotate
 
 from    alpsup.utils                import  parse_kwargs, get_source_info, get_source_list, get_edec, is_converged
 from    alpsup.plots                import  plot_ellipses, plot_lightcurve
-from    alpsup.paths                import  gen_dirs, get_results_dir, CONFIGS_DIR
+from    alpsup.paths                import  get_results_dir, CONFIGS_DIR
 from    alpsup.datasets             import  get_hess_dataset, ATOL
 from    alpsup.logs                 import  init_log
 
@@ -475,17 +473,17 @@ if __name__ == "__main__":
     # Extend end of last block to include full time interval
     bblocks_edges_flux[-1] = sorted(dataset_obs.gti.time_start)[-1].mjd
 
-    # NOTE: Split blocks separated by very long periods with no data (as variability could occur)
+    # NOTE / TODO: Split blocks separated by very long periods with no data (as variability could occur)
     # a.k.a. "gaps in the data" (This affects mainly PKS1510-089, a variable source in Fermi-LAT with variability not visible in HESS data)
-    time_starts = sorted(dataset_obs.gti.time_start)
+    '''time_starts = sorted(dataset_obs.gti.time_start)
     for i in range(len(time_starts) - 1):
         if (time_starts[i + 1].mjd - time_starts[i].mjd) > 2500:
             log.warning("Found long gap in data!")
             # NOTE: For now, split it along the middle! This might be a problem for Fermi-LAT analysis later on!
             time_mid = (time_starts[i + 1].mjd + time_starts[i].mjd) / 2.0
             # TODO: This might break if not first block!
-            bblocks_edges_flux = np.insert(bblocks_edges_flux, 1, time_mid)
-
+            bblocks_edges_flux = np.insert(bblocks_edges_flux, 1, time_mid)'''
+            
     # Define time intervals for Bayesian blocks
     t_edges_bb_flux = Time(bblocks_edges_flux, format = "mjd")
     t_intervals_bb_flux = [Time([tstart, tstop]) for tstart, tstop in zip(t_edges_bb_flux[:-1], t_edges_bb_flux[1:])]
@@ -760,25 +758,10 @@ if __name__ == "__main__":
     for k in range(1, len(ellipses)):
         # Check current versus previous
         inter = intersection(ells[k], ells[k-1])
-        # TODO: Plot intersection
-        # plot_polygon(inter, ax = ax, add_points=False, fc='red')
         # Is intersection empty
         inters_empty.append(inter.is_empty)
 
-    # NOTE: ALTERNATIVE APPROACH without combining overlapping Bayesian blocks sequentially
-    '''
-    # Final time segmentation: merge contiguous blocks with overlapping ellipses
-    final_times = [list(times[0])]
-    for k, empty in enumerate(inters_empty, start=1):
-        if not empty:
-            final_times[-1][1] = times[k][1]   # overlap — extend current group
-        else:
-            final_times.append(list(times[k]))  # no overlap — start new group
-
-    bblock_table = Table(rows=final_times, names=["time_min", "time_max"])
-    '''
-
-    # NOTE: Combining overlapping Bayesian blocks sequentially
+    # Combine overlapping Bayesian blocks sequentially
     final_times = [list(times[0])]
     group = [0]
     for k in range(1, len(ells)):
@@ -790,10 +773,12 @@ if __name__ == "__main__":
             final_times.append(list(times[k]))
             group = [k]
 
+    # TODO: ADDITIONAL COMBINATION OF BLOCKS BASED ON INDEX VARIANCE
+
     # Define table of final time segmentation
     bblock_table = Table(rows = final_times, names = ["time_min", "time_max"])
 
-        # TODO: SIMPLIFY PLOTTING (RIGHT NOW, RE-COMPUTES ELLIPSES?)
+    # TODO: SIMPLIFY PLOTTING (RIGHT NOW, RE-COMPUTES ELLIPSES?)
 
     # NOTE: If only one Bayesian block, extend times to span full GTI interval
     # This is not reflected on the Bayesian blocks on the plot (as these are the results of the computed blocks), only in the final time segmentation values
@@ -835,3 +820,5 @@ if __name__ == "__main__":
     log.info(f"Saving final plots...")
     plot_lightcurve(target, args.bblock)
     plot_ellipses(target, args.bblock, print_labels = args.annotate, loc = kwargs.get("loc", "default"))
+
+    log.info(f"H.E.S.S. Lightcurve Temporal Analysis complete! :)")

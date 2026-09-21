@@ -2,21 +2,26 @@ import  os
 import  sys
 import  logging
 
+from    pathlib         import  Path
+
 from    alpsup.paths    import  get_results_dir
 
 
-def init_log(target: str,  
-             bblock: str = "baseline",
+def init_log(target: str | None = None,  
+             bblock: str | None = None,
              ebl: str | None = None ,     
-             fname: str = "log.log", ) -> logging.Logger:
+             fname: str = "log.log", 
+             path: str | Path | None = None) -> logging.Logger:
     """
     Initialize logging functionality (global for consistency across scripts)
 
     Parameters
     ----------
     target (str)    : Name of target (for folder saving).
-    fname (str)     : Filename of log, including extension. Default: log.log.
-    bblock (str)    : Time/Bayesian block. Default: baseline.
+    bblock (str)    : Time/Bayesian block. Default: "baseline".
+    ebl (str)       : Name of EBL model (for folder saving). Default: None.
+    fname (str)     : Filename of log, including extension. Default: "log.log".
+    path (str, Path): If path given, use that one instead of constructing it.
 
     Returns
     -------
@@ -24,7 +29,12 @@ def init_log(target: str,
     """
 
     # Log file path saved to bblock subfolder of target with given file name
-    dir_log = get_results_dir(target, bblock, ebl, output = "logs")
+    if path is None:
+        dir_log = get_results_dir(target, bblock, ebl, output = "logs")
+    # If path given, use that one intead!
+    else:
+        dir_log = Path(path)
+
     # Create directory if it doesn't exist
     os.makedirs(name = dir_log, exist_ok = True)
 

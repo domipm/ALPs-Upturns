@@ -5,34 +5,33 @@
 
 import  os
 import  yaml
+import  logging
 import  warnings
 import  argparse
 
 import  numpy                       as      np
 
-from    pathlib                     import  Path
-
 from    astropy                     import  units as u
 from    astropy.io                  import  ascii
 from    astropy.wcs                 import  FITSFixedWarning
 
-from    ebltable.tau_from_model     import  OptDepth
-
-from    gammapy.maps                import  MapAxis
-from    gammapy.modeling            import  Fit, Parameter, Parameters
-from    gammapy.modeling.models     import  (
-                                                Models, SkyModel, SpectralModel, PointSpatialModel, TemplateSpectralModel, CompoundSpectralModel, 
-                                                PowerLawSpectralModel, LogParabolaSpectralModel, SmoothBrokenPowerLawSpectralModel, BrokenPowerLawSpectralModel
-                                            )
-from    gammapy.datasets            import  Datasets, SpectrumDatasetOnOff
+from    gammapy.modeling            import  Fit
+from    gammapy.modeling.models     import  ( Models, SkyModel, PointSpatialModel, CompoundSpectralModel, 
+                                              PowerLawSpectralModel, LogParabolaSpectralModel, SmoothBrokenPowerLawSpectralModel )
+from    gammapy.datasets            import  Datasets, Dataset
 from    gammapy.estimators          import  FluxPointsEstimator
 
 from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff, CompositeSpectralModel, EBLTableSpectralModel
-from    alpsup.utils                import  get_source_list, get_source_info, par_uconv, tab_uconv, parse_kwargs, get_edec
+from    alpsup.utils                import  get_source_list, get_source_info, par_uconv, tab_uconv, parse_kwargs
 from    alpsup.logs                 import  init_log
 from    alpsup.plots                import  plot_sed_joint
 from    alpsup.paths                import  get_results_dir, CONFIGS_DIR
 from    alpsup.datasets             import  get_flat_dataset, get_hess_dataset
+from    alpsup.parameters           import  set_param_bounds
+
+
+# Get logger function
+log = logging.getLogger(__name__)
 
 
 # Default HAP dataset and config
@@ -43,33 +42,9 @@ HAP_CONFIG = "std_ImPACT_hybrid_fullEnclosure_updated"
 MODELS_EQUIV = dict.fromkeys(
     ['PowerLaw', 'PL'], PowerLawSpectralModel()) | dict.fromkeys(
     ['LogParabola', 'LP'], LogParabolaSpectralModel()) | dict.fromkeys(
-    ['SmoothBrokenPowerLaw', 'SBPL'], SmoothBrokenPowerLawSpectralModel(), ) 
-
-# TODO: HANDLE DEFAULTS BETTER - FUNCTION THAT UPDATES AUTOMATICALLY
-# Default values and bounds of parameters
-PARAMETERS_DEFAULT = {
-    # Global
-    "reference": 1.00 * u.TeV,
-    "amplitude": 1e-12 * u.Unit("TeV-1 s-1 cm-2"),
-    "amplitude_min": 1e-20,
-    "amplitude_max": 1e-05,
-    # PowerLaw
-    "index": 2.00,
-    "index_min": 0.00,
-    "index_max": 5.00,
-    # LogParabola
-    "alpha_min": 0.00,
-    "alpha_max": 5.00,
-    "beta_min": 0.00,
-    "beta_max": 2.00,
-    # SmoothBrokenPowerLaw
-    "index1_min": 0.00,
-    "index1_max": 5.00,
-    "index2_min": 0.00,
-    "index2_max": 5.00, 
-    "ebreak_min": 0.000,
-    "ebreak_max": 100.0,
-}
+    # NOTE: SmoothBrokenPowerLaw model, if using index1==index2, throws an (initial) warning about degeneracy!
+    # Slight offset in initial parameters solves this issue
+    ['SmoothBrokenPowerLaw', 'SBPL'], SmoothBrokenPowerLawSpectralModel(index1 = 2.0, index2 = 1.5), ) 
 
 
 def ebl_type(ebl_name):
@@ -77,18 +52,84 @@ def ebl_type(ebl_name):
     return None if ebl_name.lower() == "none" else ebl_name
 
 
-if __name__ == "__main__":
+def run_spectral_fit(dataset: Datasets | Dataset, target: str, use_edec: bool = True):
+    """
+    Run spectral fit of the dataset, which must include the models to be fit and its parameters.
+    """
+
+    # Run initial fit
+    log.info("Running initial fit...")
+    fit_joint = Fit()
+    results_joint = fit_joint.run(datasets = dataset)
+    log.info("Initial fit done!")
+
+    # Compute decorrelation energy
+    if use_edec:
+
+        # NOTE: Fixed bug in Edec computation, covariance matrix not propagated to intrinsic model properly
+        edec = dataset.models[target].spectral_model.pivot_energy
+        log.info(f"Decorrelation energy: {edec:.6f}")
+            
+        # Set decorrelation energy as reference
+        dataset.models[target].parameters["reference"].quantity = edec
+        # Set amplitude as that of model evaluated at reference (improves convergence)
+        dataset.models[target].parameters["amplitude"].quantity = dataset.models[target].spectral_model(edec)
+
+        # Run the joint fit and print the results
+        log.info("Running main fit...")
+        fit_joint = Fit()
+        results_joint = fit_joint.run(datasets = dataset)
+        log.info("Main fit done!")
+
+    # TODO: Run a quick check for any parameters saturating, and maybe re-run with less strict parameter boundaries?
+    # Otherwise, just make sure the fits look right!
+
+    # Display info on fit and best-fit model
+    log.info(results_joint)
+    log.info(dataset.models[target])
+
+    # Return the fit result, dataset, and flux points
+    # TODO / NOTE: NO NEED TO RETURN DATASET RIGHT?
+    return results_joint
+
+
+def run_fluxp_estimator(dataset: Datasets | Dataset, target: str,
+                        use_bias: bool = True):
+
+    # Compute flux points on Fermi-LAT data
+    fluxp_joint_flat = None
+    if "Fermi-LAT" in dataset.names:
+        log.info("Computing flux points for Fermi-LAT...")
+        fluxp_joint_flat = FluxPointsEstimator(
+            energy_edges = dataset["Fermi-LAT"].counts.geom.axes["energy"].edges.to(u.TeV),
+            source = f"{target} Unbiased" if use_bias else target,
+            selection_optional = ["all"]).run([dataset["Fermi-LAT"]])
+        log.info("Flux points estimator for Fermi-LAT done!")
+
+    # Compute flux points on HESS data
+    fluxp_joint_hess = None
+    if "HESS" in dataset.names:
+        log.info("Computing flux points for HESS...")
+        fluxp_joint_hess = FluxPointsEstimator(
+            energy_edges = dataset["HESS"].counts.geom.axes["energy"].edges.to(u.TeV),
+            source = target, selection_optional = ["all"]).run([dataset["HESS"]])
+    log.info("Flux points estimator for HESS done!")
+
+    return fluxp_joint_flat, fluxp_joint_hess
+
+
+def main():
 
     # Arguments for script
     parser = argparse.ArgumentParser(description = "Run joint Fermi-LAT and H.E.S.S. spectral analysis for a source using GammaPy",
                                      formatter_class = argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("-s", "--source", required = True, choices = get_source_list(),
+    parser.add_argument("--source", required = True, choices = get_source_list(),
                         help = "Target source name for which analysis is performed.")
     
-    parser.add_argument("-b", "--bblock", required = True, 
+    parser.add_argument("--bblock", required = True, 
                         help = "Which Bayesian block to consider (name of subfolder, for analyzing time selection blocks or different configs).")
-    parser.add_argument("-e", "--ebl", default = "dominguez", type = ebl_type,
+    parser.add_argument("--ebl", default = "dominguez", type = ebl_type,
                         choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez", None], 
                         help = "EBL absorption model to use (loaded from EBLTable, or None).")
 
@@ -100,13 +141,13 @@ if __name__ == "__main__":
                         # default = "std_ImPACT_hybrid_fullEnclosure_updated", 
                         help = "Which HAP reconstruction configuration to use")
     
-    parser.add_argument("-m", "--model", default = None, choices = ["PowerLaw", "PL", "LogParabola", "LP", "SmoothBrokenPowerLaw", "SBPL", "BrokenPowerLaw", "BPL"],
+    parser.add_argument("--model", default = None, choices = ["PowerLaw", "PL", "LogParabola", "LP", "SmoothBrokenPowerLaw", "SBPL", "BrokenPowerLaw", "BPL"],
                         help = "Spectral model to use. By default, load it from HESS analysis, unless overriden.")
     
     parser.add_argument("--bias", action = argparse.BooleanOptionalAction, default = True,
-                        help = "Include bias prior on HESS dataset for systematic uncertainty.")
+                        help = "Include bias prior on HESS dataset for systematic uncertainty (--bias, --no-bias).")
 
-    parser.add_argument("-p", "--plots-only", action = "store_true", help = "Generate output plots, without running the analysis")
+    parser.add_argument("--plots-only", action = "store_true", help = "Generate output plots, without running the analysis")
 
     parser.add_argument("--kwargs", nargs = '*', help = "Additional keyword arguments formatted as 'key=value'.")
 
@@ -141,14 +182,16 @@ if __name__ == "__main__":
         hess_config = yaml.safe_load(f)
 
     # Initialize logging (initialize after possible plotting, otherwise gets removed!)
-    log = init_log(target = target, bblock = args.bblock, ebl = args.ebl, fname = "joint_analysis.log")
+    log = init_log(target = target, bblock = args.bblock, ebl = args.ebl, fname = "spectral_analysis.log")
 
     # Display info of the target
     log.info(f"Joint Fermi-LAT and HESS analysis of target source:\n{target}\n({target_4FGL})\nPosition: {target_position.data}\nRedshift z = {target_redshift}\nAvailable instruments: {target_instruments}")
 
+
     # ==================================== #
     # LOAD FERMI-LAT AND H.E.S.S. DATASETS #
     # ==================================== #
+
 
     # NOTE: For some sources, Fermi-LAT not available, so skip this step!
     # Only load Fermi-LAT if in instruments list of source
@@ -193,9 +236,11 @@ if __name__ == "__main__":
         except:
             raise Exception("Unable to generate GammaPy H.E.S.S. datasets!")
 
+
     # ============================= #
     # DEFINE MODELS FOR ALL SOURCES #
     # ============================= #
+
 
     # Get all Fermi-LAT models, removing target (we will define in later)
     # Make sure units converted into HESS scale
@@ -208,7 +253,7 @@ if __name__ == "__main__":
         # If background model found, change filename path for serialization
         if "Models Background" in dataset_flat.models.names:
             dataset_flat.models["Models Background"].spatial_model.filename = f"{dir_fout}/flat_models_background.fits"
-        
+
     # TODO: PERFORM INTRINSIC SPECTRAL MODEL TEST?
 
     # Read model from HESS config file, if possible, and if model argument not given
@@ -227,7 +272,6 @@ if __name__ == "__main__":
         # Define target sky model
         target_model = SkyModel(
             name = target, datasets_names = ["HESS", "Fermi-LAT"],
-            # spectral_model = PowerLawSpectralModel(),
             spectral_model = model,
             spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs"), )
 
@@ -240,6 +284,7 @@ if __name__ == "__main__":
 
     # If model argument given, override
     else:
+
         # Define SkyModel for given spectral model
         target_model = SkyModel(
             name = target, datasets_names = ["HESS", "Fermi-LAT"],
@@ -277,45 +322,19 @@ if __name__ == "__main__":
     # In all cases, freeze spatial model
     target_model.spatial_model.freeze()
 
-    # Set initial reference energy
-    target_model.parameters["reference"].quantity = kwargs.get("reference", 1) * u.TeV
+    # For SmoothBrokenPowerLaw, set Ebreak initial value and bounds!
+    if target_model.spectral_model.intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
+        if kwargs.get("ebreak", None) is None:
+            kwargs["ebreak"] = float(np.sqrt(dataset_energy_range[0] * dataset_energy_range[1]).value)
+        if kwargs.get("ebreak_min", None) is None:
+            # kwargs["ebreak_min"] = float(dataset_energy_range[0].to(u.TeV).value)
+            kwargs["ebreak_min"] = 0.01
+        if kwargs.get("ebreak_max", None) is None:
+            # kwargs["ebreak_max"] = float(dataset_energy_range[1].to(u.TeV).value)
+            kwargs["ebreak_max"] = 1.00
 
-    # Set amplitude bounds
-    target_model.parameters["amplitude"].min = kwargs.get("amplitude_min", 1e-15)
-    target_model.parameters["amplitude"].max = kwargs.get("amplitude_max", 1e-04)
-
-    # TODO: GLOBAL DICTIONARY WITH ALL THE DEFAULTS FOR ALL MODELS!
-
-    # PowerLaw - Set index
-    if target_model.spectral_model.intrinsic_model.__class__.__name__ == "PowerLawSpectralModel":
-
-        target_model.parameters["index"].min = kwargs.get("index_min", 0.00)
-        target_model.parameters["index"].max = kwargs.get("index_max", 5.00)
-
-    # LogParabola - Set alpha, beta
-    if target_model.spectral_model.intrinsic_model.__class__.__name__ == "LogParabolaSpectralModel":
-
-        target_model.parameters["alpha"].min = kwargs.get("alpha_min", 0.00)
-        target_model.parameters["alpha"].max = kwargs.get("alpha_max", 5.00)
-
-        target_model.parameters["beta"].min = kwargs.get("beta_min", 0.00)
-        target_model.parameters["beta"].max = kwargs.get("beta_max", 2.00)
-
-    # SmoothBrokenPowerLaw - Set index1, index2, ebreak, beta
-    if target_model.spectral_model.intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLaw":
-
-        target_model.parameters["index1"].min = kwargs.get("index1_min", 0.00)
-        target_model.parameters["index1"].max = kwargs.get("index1_max", 5.00)
-
-        target_model.parameters["index2"].min = kwargs.get("index2_min", 0.00)
-        target_model.parameters["index2"].max = kwargs.get("index2_max", 5.00)
-
-        target_model.parameters["ebreak"].quantity = kwargs.get("ebreak", (dataset_energy_range[0] + dataset_energy_range[1]) / 2.0)
-        target_model.parameters["ebreak"].min = kwargs.get("ebreak_min", 0.10 * dataset_energy_range[0])
-        target_model.parameters["ebreak"].max = kwargs.get("ebreak_max", 10.0 * dataset_energy_range[1])
-
-        target_model.parameters["beta"].value = 1.00
-        target_model.parameters["beta"].frozen = True
+    # Set all parameter bounds based on kwargs or defaults
+    set_param_bounds(target_model, bounds = "fit", **kwargs)
 
     # Define joint datasets object for Fermi-LAT and HESS (including other models)
     dataset_joint = Datasets(
@@ -324,9 +343,11 @@ if __name__ == "__main__":
         # Add all models to the datasets, including target
     dataset_joint.models = Models( [ *( dataset_flat.models if dataset_flat is not None else [] ), target_model ] )
 
+
     # ================================= #
     # SET UP BIASED MODELS AND DATASETS #
     # ================================= #
+
 
     # Ensure, if bias included, that datasets include it, otherwise run fit with standard datasets
     if args.bias is True:
@@ -382,68 +403,23 @@ if __name__ == "__main__":
     log.info(f"Constructed joint Fermi-LAT and H.E.S.S. datasets to fit:\n{dataset_joint}")
     log.info(f"Target source model:\n{target_model}")
 
+
     # ================================= #
     # RUN SPECTRAL FIT ON JOINT DATASET #
     # ================================= #
 
-    # Run initial fit
-    log.info("Running initial fit...")
-    fit_joint = Fit()
-    results_joint = fit_joint.run(datasets = dataset_joint)
-    log.info("Initial fit done!")
 
-    # Compute decorrelation energy
-    edec = get_edec(dataset_joint.models[target].spectral_model.intrinsic_model)
-    edec_gp = dataset_joint.models[target].spectral_model.intrinsic_model.pivot_energy
-    log.info(f"Decorrelation energy: {edec:.6f}")
-    log.info(f"GammaPy check: {edec_gp:.6f}")
-    if edec_gp is None:
-        log.warning("Decorrelation energy computed with GammaPy could not be computed!")
-    # TODO: CHECK ROUNDING ERRORS!
-    # elif edec_gp != edec:
-    elif not np.isclose(edec, edec_gp):
-        log.warning(f"Decorrelation energy computed manually differs from GammaPy method! (Expected if model is not PowerLaw)")
-        if dataset_joint.models[target].spectral_model.intrinsic_model.__class__.__name__ != "PowerLawSpectralModel":
-            log.warning(f"Setting GammaPy pivot energy as reference!")
-            edec = edec_gp
-        
-    # Set decorrelation energy as reference
-    dataset_joint.models[target].parameters["reference"].quantity = edec_gp
-    # Set amplitude as that of model evaluated at reference (improves convergence)
-    dataset_joint.models[target].parameters["amplitude"].quantity = dataset_joint.models[target].spectral_model(edec_gp)
+    # Run spectral fitting procedure
+    results_joint = run_spectral_fit(dataset = dataset_joint, target = target)
 
-    # Run the joint fit and print the results
-    log.info("Running main fit...")
-    fit_joint = Fit()
-    results_joint = fit_joint.run(datasets = dataset_joint)
-    log.info("Main fit done!")
+    # Compute flux points on both Fermi-LAT and HESS
+    fluxp_joint_flat, fluxp_joint_hess = run_fluxp_estimator(dataset = dataset_joint, target = target)
 
-    # TODO: Run a quick check for any parameters saturating, and maybe re-run with less strict parameter boundaries?
-    # Otherwise, just make sure the fits look right!
-
-    # Display info on fit and best-fit model
-    log.info(results_joint)
-    log.info(dataset_joint.models[target])
-
-    # Compute flux points on Fermi-LAT data
-    if dataset_flat is not None:
-        log.info("Computing flux points for Fermi-LAT...")
-        fluxp_joint_flat = FluxPointsEstimator(
-            energy_edges = dataset_joint["Fermi-LAT"].counts.geom.axes["energy"].edges.to(u.TeV),
-            source = f"{target} Unbiased" if args.bias else target,
-            selection_optional = ["all"]).run([dataset_joint["Fermi-LAT"]])
-        log.info("Flux points estimator for Fermi-LAT done!")
-
-    log.info("Computing flux points for HESS...")
-    # Compute flux points on HESS data
-    fluxp_joint_hess = FluxPointsEstimator(
-        energy_edges = dataset_joint["HESS"].counts.geom.axes["energy"].edges.to(u.TeV),
-        source = target, selection_optional = ["all"]).run([dataset_joint["HESS"]])
-    log.info("Flux points estimator for HESS done!")
 
     # ============================ #
     # SAVE RESULTS, OUTPUTS, PLOTS #
     # ============================ #
+
 
     log.info("Saving result output files...")
     # Save fit results
@@ -478,3 +454,11 @@ if __name__ == "__main__":
     plot_sed_joint(target, bblock = args.bblock, ebl = args.ebl)
 
     log.info(f"Joint Fermi-LAT + H.E.S.S. GammaPy Analysis complete! :)")
+
+    return
+
+
+if __name__ == "__main__":
+
+    main()
+

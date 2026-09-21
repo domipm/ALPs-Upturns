@@ -134,7 +134,9 @@ def save_alp_metadata(dir_aout_ebl, target, ebl_model, args):
     return
 
 
-if __name__ == "__main__":
+def main():
+
+    # TODO: LOGGING!
 
     # Arguments for script
     parser = argparse.ArgumentParser(description = "Run HESS analysis for a source using GammaPy",
@@ -143,7 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", choices = [*get_source_list()], help = "Source name.")    
     
     # Simulation parameters
-    parser.add_argument("--nsim", default = 100, type = int, help = "Number of simulations to perform.")
+    parser.add_argument("--nsim", default = 250, type = int, help = "Number of simulations to perform.")
     parser.add_argument("--ebl", choices = ["dominguez", "finke2022", "franceschini", "saldana-lopez"], default = "dominguez", type = str, help = "EBL absorption model to use (loaded from EBLTable).")
     parser.add_argument("--seed", default = 42, type = int, help = "Random seed")
     # ALP parameters
@@ -331,3 +333,12 @@ if __name__ == "__main__":
                     popt = popt_list, pcov = pcov_list, chisq = chisq_list,)
         # log.info(f"Results saved!")
         print(f"Results saved!")
+
+
+    return
+
+
+if __name__ == "__main__":
+
+    main()
+

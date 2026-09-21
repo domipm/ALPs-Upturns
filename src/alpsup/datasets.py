@@ -2,6 +2,7 @@ import  os
 import  yaml
 import  warnings
 
+import  numpy               as      np
 import  astropy.units       as      u
 
 from    pathlib                 import  Path
@@ -78,14 +79,21 @@ def get_hess_dataset(target: str,
     # Stack reduce the dataset
     dataset = dataset_obs.stack_reduce(name = dataset_name)
 
+    # Define safe energy range
+    emin_safe, emax_safe = dataset.energy_range_safe[0].data.min(), dataset.energy_range_safe[-1].data.max()
+
     # Define energy axis
     energy_axis = MapAxis.from_energy_bounds(
         energy_min = dataset.counts.geom.axes["energy"].bounds[0],
         energy_max = dataset.counts.geom.axes["energy"].bounds[1],
+        # NOTE: Resample energy axis based on safe energy range only?
+        # energy_min = emin_safe, energy_max = emax_safe,
         unit = u.TeV, nbin = nbins, per_decade = nbins_per_dec, )
 
     # Resample energy axis
-    dataset = dataset.resample_energy_axis(energy_axis, name = dataset_name)
+    # NOTE: Ignore RuntimeWarnings of invalid value encountered in divide
+    with np.errstate(invalid = "ignore"):
+        dataset = dataset.resample_energy_axis(energy_axis, name = dataset_name)
 
     return dataset_obs, dataset
 

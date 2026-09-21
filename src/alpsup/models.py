@@ -228,7 +228,6 @@ class BiasedCompoundSpectralModel(SpectralModel):
 
         return self.operator(val1, val2)
     
-
     def evaluate_error(self, energy, n_samples=3500, random_state=42, samples=None):
         """Evaluate spectral model error from parameter distribution sampling."""
 
@@ -573,8 +572,25 @@ class CompositeSpectralModel(SpectralModel):
     
     @property
     def pivot_energy(self):
+
         # Ensure pivot / decorrelation energy computed on intrinsic model
-        return self._intrinsic_model.pivot_energy
+        # return self._intrinsic_model.pivot_energy
+
+        # NOTE: Important, the covariance model is not transmitted from the
+        # overall model to the intrinsic one! We need to make sure the matrix
+        # is correctly "back propagated"
+
+        intrinsic_names = self._intrinsic_model.parameters.names
+        all_names = self.parameters.names
+        indices = [all_names.index(name) for name in intrinsic_names]
+
+        covariance = self.covariance.data[np.ix_(indices, indices)]
+
+        model = self._intrinsic_model.copy()
+        model.covariance = covariance
+
+        return model.pivot_energy
+
 
     def evaluate(self, energy, **kwargs):
 
