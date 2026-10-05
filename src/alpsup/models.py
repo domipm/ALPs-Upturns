@@ -385,7 +385,59 @@ SPECTRAL_MODEL_REGISTRY.append(BiasedCompoundSpectralModel)
 DATASET_REGISTRY.append(BiasedPriorSpectrumDatasetOnOff)
 
 
-# TODO: SIMPLE EBLTABLE MODEL WRAPPER
+class CustomSmoothBrokenPowerLawSpectralModel(SpectralModel):
+
+    # Define tag for model
+    tag = ["CustomSmoothBrokenPowerLawSpectralModel"]
+
+    # Define parameters
+    index = Parameter(
+        name = "index",
+        value = 2.0,
+        min = 0.0,
+        max = 5.0,
+        frozen = False, )
+    indexdelta = Parameter(
+        name = "indexdelta",
+        value = 2.0,
+        min = 0.0,
+        max = 5.0,
+        frozen = False, )
+    amplitude = Parameter(
+        name = "amplitude",
+        value = 1e-12,
+        unit = u.Unit("TeV-1 s-1 cm-2"),
+        min = 1e-20,
+        max = 1e-04,
+        scale_method = "scale10",
+        interp = "log",
+        frozen = False, )
+    ebreak = Parameter(
+        name = "ebreak",
+        value = 1.0,
+        unit = "TeV",
+        min = 0.01,
+        max =  31.6,
+        frozen = False, )
+    reference = Parameter(
+        name = "reference",
+        value = 1.0,
+        unit = u.Unit("TeV"),
+        frozen = True, )
+    beta = Parameter(
+        name = "beta",
+        value = 1.00,
+        min = 0.10,
+        max = 2.50,
+        frozen = True, )
+    
+    # Evaluate method - return function value
+    @staticmethod
+    def evaluate(energy, index, indexdelta, amplitude, ebreak, reference, beta):
+        # Multiply beta by sign of delta index (!)
+        beta *= np.sign(indexdelta)
+        # Return spectral model evaluated at energy and indices
+        return amplitude * (energy / reference)**(-index) * (1 + (energy / ebreak) ** (indexdelta / beta) ) ** (- beta)
 
 
 class EBLTableSpectralModel(TemplateSpectralModel):
@@ -454,9 +506,6 @@ class EBLTableSpectralModel(TemplateSpectralModel):
 
         return cls(energy = template.energy, values = template.values,
                    ebl_name = ebl_name, redshift = redshift, )
-
-
-# TODO: SIMPLE SPECTRAL MODEL WRAPPER FOR UPTURN MODEL
 
 
 class UpturnSpectralModel(SpectralModel):
@@ -710,3 +759,4 @@ class CompositeSpectralModel(SpectralModel):
 SPECTRAL_MODEL_REGISTRY.append(EBLTableSpectralModel)
 SPECTRAL_MODEL_REGISTRY.append(UpturnSpectralModel)
 SPECTRAL_MODEL_REGISTRY.append(CompositeSpectralModel)
+SPECTRAL_MODEL_REGISTRY.append(CustomSmoothBrokenPowerLawSpectralModel)
