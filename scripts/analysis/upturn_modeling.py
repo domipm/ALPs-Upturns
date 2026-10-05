@@ -219,6 +219,9 @@ def is_converged(params):
 
     # Loop over free parameters
     for param in params:
+        # NOTE: Skip ebreak, beta_upt, and bias
+        if param.name in ["ebreak", "beta_upt", "bias"]:
+            continue
         if param.frozen == False:
             # Check if parameter saturates
             if np.round(param.value, 2) == param.min or np.round(param.value, 2) == param.max:
@@ -449,7 +452,20 @@ def main():
     datasets = Datasets.read(
         filename = dir_gout.joinpath(f"{args.dataset}_datasets.yaml"),
         filename_models = dir_gout.joinpath(f"{args.dataset}_models.yaml"), )
-    
+
+    # Get energy range
+    dataset_hess = datasets["HESS"]
+    try:    
+        dataset_flat = datasets["Fermi-LAT"]
+    except:
+        dataset_flat = None
+    dataset_energy_range = [None, dataset_hess.counts.geom.axes["energy"].edges[-1].to(u.TeV)]
+    if dataset_flat is not None:
+        dataset_energy_range[0] = dataset_flat.counts.geom.axes["energy"].edges[0].to(u.TeV)
+    elif dataset_hess is not None:
+        dataset_energy_range[0] = dataset_hess.counts.geom.axes["energy"].edges[0].to(u.TeV)
+
+
     # Add spectral upturn to the model (HESS model, including bias term) 
     datasets.models[target].spectral_model.upturn_model = UpturnSpectralModel()
 
@@ -479,21 +495,6 @@ def main():
     datasets.models[target].parameters["indexdelta_upt"].value = - 0.1
     log.info("Datasets and models loaded!")
 
-    # TODO: TEST THIS REFACTORING DIDN'T BREAK ANYTHING
-    # Combine spectral model with upturn and set up all parameters
-    setup_upturn_model(datasets, target, target_redshift, args.ebl, args.tau_limit, **kwargs)
-    log.info(f"Model used for upturn modeling:\n{datasets.models[target].spectral_model}")
-
-
-    # TODO: FINISH REFACTORING THIS!
-    
-
-    # Run upturn modeling, and obtain fit-statistic grids
-    cstat_grid = run_upturn_model(datasets, target, target_redshift, e_tau, **kwargs)
-    plot_cstatgrid(target, args.bblock, args.ebl, dataset = args.dataset, which = "cstat")
-
-    exit()
-
     # Define grid for Index2_brk = gamma2 and E_brk = ebreak2
     ibreak_vals = np.linspace(kwargs.get("ibreak_min", -0.01), -5.00, args.npoints) # from 0 (no break) to -5 (sharp break) linearly spaced
     ebreak_vals = np.logspace(np.log10( e_tau.value ), np.log10( 31.6 ), args.npoints) # from E(tau) to 31.6 TeV
@@ -503,10 +504,13 @@ def main():
     # Initialize fit-statistic grid to zero
     cstat_grid = np.zeros_like(ibreak_grid)
 
-    # Store default parameters
-    params_org = datasets.models[target].parameters
     # Define new (copy) dataset object
     dataset = datasets.copy()
+    # Store default parameters
+    params_org = datasets.models[target].parameters
+
+    # Set parameter bounds
+    set_param_bounds(dataset.models[target], bounds = "upt")
 
     # Initialize new fitting object
     fit = Fit()
@@ -522,6 +526,12 @@ def main():
                 par.value = params_org[par.name].value
                 par.error = params_org[par.name].error
 
+            # Let beta free
+            dataset.models[target].parameters["beta_upt"].frozen = True
+            # dataset.models[target].parameters["beta_upt"].value = np.abs(ibreak)
+            # dataset.models[target].parameters["beta_upt"].min = 0.001
+            # dataset.models[target].parameters["beta_upt"].max = 1.15
+
             # Set break parameters from loop
             dataset.models[target].parameters["e_upt"].value = ebreak
             dataset.models[target].parameters["indexdelta_upt"].value = ibreak
@@ -533,13 +543,16 @@ def main():
 
             # Rest of the parameters (index, amplitude, etc.) depend on intrinsic model, should be free
 
-            # NOTE: Smooth broken power law parameters
+            # Smooth broken power law parameters
             if "ebreak" in dataset.models[target].parameters.names:
-                dataset.models[target].parameters["ebreak"].frozen = True
-                dataset.models[target].parameters["ebreak"].min = kwargs.get("ebreak_min", 0.01)
-                # NOTE: SET SBPL EBREAK BELOW E(tau=2) SO THERE'S NO OVERLAP!
-                dataset.models[target].parameters["ebreak"].max = kwargs.get("ebreak_max", get_etau(redshift = target_redshift, ebl_model = args.ebl, tau_lim = 1))
-
+                dataset.models[target].parameters["ebreak"].frozen = kwargs.get("ebreak_frozen", False)
+                dataset.models[target].parameters["ebreak"].min = kwargs.get("ebreak_min", dataset_energy_range[0].value)
+                # NOTE: Set SBPL Ebreak parameter below E(tau = 2) so there's no overlap with upturn!
+                dataset.models[target].parameters["ebreak"].max = kwargs.get("ebreak_max", get_etau(redshift = target_redshift, ebl_model = args.ebl, tau_lim = 2))
+                # NOTE: Also, make sure initial value falls within these bounds
+                # dataset.models[target].parameters["ebreak"].value = kwargs.get("ebreak", 0.1)
+                # Indexdelta maximum
+                dataset.models[target].parameters["indexdelta"].max = kwargs.get("indexdelta_max", 7.5)
             # Attempt fit with retry
             success = False
             # Restart result value

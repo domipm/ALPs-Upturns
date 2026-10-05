@@ -329,6 +329,7 @@ def main():
         # log.info(f"Saving simulation fit results into files...")
         print(f"Saving simulation fit results into files...")
         # Save as a single numpy file
+        # TODO: Add "ebl" folder for consistency!
         np.savez(file = dir_aout_ebl / f"sim_fit_m{m_alp:g}_g{g_alp:g}_B0{B0:g}.npz", 
                     popt = popt_list, pcov = pcov_list, chisq = chisq_list,)
         # log.info(f"Results saved!")

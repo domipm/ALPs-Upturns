@@ -21,7 +21,7 @@ from    gammapy.modeling.models     import  ( Models, SkyModel, PointSpatialMode
 from    gammapy.datasets            import  Datasets, Dataset
 from    gammapy.estimators          import  FluxPointsEstimator
 
-from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff, CompositeSpectralModel, EBLTableSpectralModel
+from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff, CompositeSpectralModel, EBLTableSpectralModel, CustomSmoothBrokenPowerLawSpectralModel
 from    alpsup.utils                import  get_source_list, get_source_info, par_uconv, tab_uconv, parse_kwargs
 from    alpsup.logs                 import  init_log
 from    alpsup.plots                import  plot_sed_joint
@@ -42,6 +42,7 @@ HAP_CONFIG = "std_ImPACT_hybrid_fullEnclosure_updated"
 MODELS_EQUIV = dict.fromkeys(
     ['PowerLaw', 'PL'], PowerLawSpectralModel()) | dict.fromkeys(
     ['LogParabola', 'LP'], LogParabolaSpectralModel()) | dict.fromkeys(
+    ['CustomSmoothBrokenPowerLaw', 'CSBPL'], CustomSmoothBrokenPowerLawSpectralModel()) | dict.fromkeys(
     # NOTE: SmoothBrokenPowerLaw model, if using index1==index2, throws an (initial) warning about degeneracy!
     # Slight offset in initial parameters solves this issue
     ['SmoothBrokenPowerLaw', 'SBPL'], SmoothBrokenPowerLawSpectralModel(index1 = 2.0, index2 = 1.5), ) 
@@ -63,17 +64,34 @@ def run_spectral_fit(dataset: Datasets | Dataset, target: str, use_edec: bool = 
     results_joint = fit_joint.run(datasets = dataset)
     log.info("Initial fit done!")
 
+    # Display info on fit and best-fit model
+    log.info(results_joint)
+    log.info(dataset.models[target])
+
     # Compute decorrelation energy
     if use_edec:
 
-        # NOTE: Fixed bug in Edec computation, covariance matrix not propagated to intrinsic model properly
         edec = dataset.models[target].spectral_model.pivot_energy
         log.info(f"Decorrelation energy: {edec:.6f}")
-            
+
+        # Get intrinsic spectral model
+        intrinsic_model = dataset.models[target].spectral_model
+        if intrinsic_model.__class__.__name__ == "CompositeSpectralModel":
+            intrinsic_model = dataset.models[target].spectral_model.intrinsic_model
+
+        # Set amplitude as that of model evaluated at reference (improves convergence)
+        if intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
+            # Get "old" parameter values
+            amplitude = dataset.models[target].parameters["amplitude"].quantity
+            reference = dataset.models[target].parameters["reference"].quantity
+            index1    = dataset.models[target].parameters["index1"].value
+            # Compute new amplitude value
+            dataset.models[target].parameters["amplitude"].quantity = amplitude * (edec / reference) ** ( - index1)
+        else:
+            dataset.models[target].parameters["amplitude"].quantity = dataset.models[target].spectral_model(edec)
+
         # Set decorrelation energy as reference
         dataset.models[target].parameters["reference"].quantity = edec
-        # Set amplitude as that of model evaluated at reference (improves convergence)
-        dataset.models[target].parameters["amplitude"].quantity = dataset.models[target].spectral_model(edec)
 
         # Run the joint fit and print the results
         log.info("Running main fit...")
@@ -81,15 +99,14 @@ def run_spectral_fit(dataset: Datasets | Dataset, target: str, use_edec: bool = 
         results_joint = fit_joint.run(datasets = dataset)
         log.info("Main fit done!")
 
-    # TODO: Run a quick check for any parameters saturating, and maybe re-run with less strict parameter boundaries?
-    # Otherwise, just make sure the fits look right!
+        # TODO: Run a quick check for any parameters saturating, and maybe re-run with less strict parameter boundaries?
+        # Otherwise, just make sure the fits look right!
 
-    # Display info on fit and best-fit model
-    log.info(results_joint)
-    log.info(dataset.models[target])
+        # Display info on fit and best-fit model
+        log.info(results_joint)
+        log.info(dataset.models[target])
 
-    # Return the fit result, dataset, and flux points
-    # TODO / NOTE: NO NEED TO RETURN DATASET RIGHT?
+    # Return the fit results
     return results_joint
 
 
@@ -141,12 +158,14 @@ def main():
                         # default = "std_ImPACT_hybrid_fullEnclosure_updated", 
                         help = "Which HAP reconstruction configuration to use")
     
-    parser.add_argument("--model", default = None, choices = ["PowerLaw", "PL", "LogParabola", "LP", "SmoothBrokenPowerLaw", "SBPL", "BrokenPowerLaw", "BPL"],
+    parser.add_argument("--model", default = None, choices = [*MODELS_EQUIV.keys()],
                         help = "Spectral model to use. By default, load it from HESS analysis, unless overriden.")
     
     parser.add_argument("--bias", action = argparse.BooleanOptionalAction, default = True,
                         help = "Include bias prior on HESS dataset for systematic uncertainty (--bias, --no-bias).")
-
+    parser.add_argument("--edec", action = argparse.BooleanOptionalAction, default = True,
+                        help = "Use decorrelation energy as reference (--edec, --no-edec).")
+    
     parser.add_argument("--plots-only", action = "store_true", help = "Generate output plots, without running the analysis")
 
     parser.add_argument("--kwargs", nargs = '*', help = "Additional keyword arguments formatted as 'key=value'.")
@@ -322,16 +341,17 @@ def main():
     # In all cases, freeze spatial model
     target_model.spatial_model.freeze()
 
-    # For SmoothBrokenPowerLaw, set Ebreak initial value and bounds!
+    # For SmoothBrokenPowerLaw, set Ebreak initial value and bounds based on datasets
     if target_model.spectral_model.intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
         if kwargs.get("ebreak", None) is None:
             kwargs["ebreak"] = float(np.sqrt(dataset_energy_range[0] * dataset_energy_range[1]).value)
+        # TODO: Set break energy based on datasets! (same as value)
         if kwargs.get("ebreak_min", None) is None:
-            # kwargs["ebreak_min"] = float(dataset_energy_range[0].to(u.TeV).value)
-            kwargs["ebreak_min"] = 0.01
+            kwargs["ebreak_min"] = float(dataset_energy_range[0].value)
         if kwargs.get("ebreak_max", None) is None:
-            # kwargs["ebreak_max"] = float(dataset_energy_range[1].to(u.TeV).value)
-            kwargs["ebreak_max"] = 1.00
+            kwargs["ebreak_max"] = float(dataset_energy_range[-1].value)
+        # NOTE: Free beta parameter? For now, leave fixed
+        target_model.spectral_model.parameters["beta"].frozen = True
 
     # Set all parameter bounds based on kwargs or defaults
     set_param_bounds(target_model, bounds = "fit", **kwargs)
@@ -410,7 +430,7 @@ def main():
 
 
     # Run spectral fitting procedure
-    results_joint = run_spectral_fit(dataset = dataset_joint, target = target)
+    results_joint = run_spectral_fit(dataset = dataset_joint, target = target, use_edec = args.edec)
 
     # Compute flux points on both Fermi-LAT and HESS
     fluxp_joint_flat, fluxp_joint_hess = run_fluxp_estimator(dataset = dataset_joint, target = target)
