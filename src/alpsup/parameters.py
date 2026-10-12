@@ -100,8 +100,12 @@ def set_param_bounds(model: SpectralModel | SkyModel,
 
         # Get name of parameter
         parname = par.name
+        # Check if model is SkyModel or SpectralModel
+        if model.__class__.__name__ is "SkyModel":
+            spectral_model = model.spectral_model
+        else:
+            spectral_model = model
         # Get type of intrinsic spectral model
-        spectral_model = model.spectral_model
         if spectral_model.__class__.__name__ is "CompositeSpectralModel":
             intrinsic_model = spectral_model.intrinsic_model
         else:
