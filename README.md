@@ -4,7 +4,7 @@
 
 The pipeline is built primarily on the open-source [Gammapy](https://github.com/gammapy/gammapy) and [FermiPy](https://github.com/fermiPy/fermipy) libraries, with additional use of [GammaALPs](https://github.com/me-manu/gammaALPs) for photon-ALP propagation simulations and [EBLTable](https://github.com/me-manu/ebltable) for extragalactic background light attenuation models.
 
-This code accompanies my [master's thesis](thesis/main.pdf) "Searches for Spectral Upturns due to Photon–Axion-Like Particle Conversions using H.E.S.S. and Fermi-LAT Observations.", which includes a full overview of the physics background, methodology, and obtained results. 
+This code accompanies my [master's thesis](https://github.com/domipm/ALPs-Upturns/blob/master/thesis/MSc%20Thesis%20-%20Light%20Shining%20through%20a%20Cosmic%20Wall.pdf) "Searches for Spectral Upturns due to Photon–Axion-Like Particle Conversions using H.E.S.S. and Fermi-LAT Observations.", which includes a full overview of the physics background, methodology, and obtained results. 
 
 This repository contains:
 - the complete analysis pipeline developed during my MSc thesis,
