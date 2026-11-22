@@ -938,6 +938,17 @@ def plot_ellipses(target: str,
         # Loop over confidence intervals and plot ellipses for each point
         for ic in range(3):
             a, b, angle = ellipses[k, ic]
+
+            params = np.array([points[k, 1], points[k, 0], a, b, angle])
+
+            if not np.all(np.isfinite(params)):
+                print(f"Invalid ellipse parameters: block={k}, CI={ic}, params={params}")
+                continue
+
+            if a <= 0 or b <= 0:
+                print(f"Invalid ellipse dimensions: block={k}, CI={ic}, a={a}, b={b}")
+                continue
+
             ellipse = Ellipse(
                 # Center ellipse at point
                 xy = (points[k, 1], points[k, 0]),
