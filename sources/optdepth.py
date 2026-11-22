@@ -15,7 +15,7 @@ from    ebltable.tau_from_model     import  OptDepth
 
 import sys
 sys.path.append("../scripts")
-from utils import get_source_info
+from alpsup.utils import get_source_info
 
 
 # Clean EBL name labels with reference
@@ -104,7 +104,11 @@ if __name__ == "__main__":
 
             # Label only dominguez ebl model sources
             if ebl_model == "dominguez":
-                target_4FGL, target_position, target_redshift = get_source_info(target)
+                source = get_source_info(target)
+                target_4FGL = source.name_4FGL
+                target_position = source.position
+                target_redshift = source.redshift
+                target_instruments = source.inst
                 label_target = target + f" (z = {target_redshift})"
             else:
                 label_target = None
@@ -220,7 +224,11 @@ if __name__ == "__main__":
 
             # Label only dominguez ebl model sources
             if ebl_model == "dominguez":
-                target_4FGL, target_position, target_redshift = get_source_info(target)
+                source = get_source_info(target)
+                target_4FGL = source.name_4FGL
+                target_position = source.position
+                target_redshift = source.redshift
+                target_instruments = source.inst
                 label_target = target + f" (z = {target_redshift})"
             else:
                 label_target = None
@@ -318,7 +326,11 @@ if __name__ == "__main__":
 
             # Label only dominguez ebl model sources
             if ebl_model == "dominguez":
-                target_4FGL, target_position, target_redshift = get_source_info(target)
+                source = get_source_info(target)
+                target_4FGL = source.name_4FGL
+                target_position = source.position
+                target_redshift = source.redshift
+                target_instruments = source.inst
                 label_target = target + f" (z = {target_redshift})"
             else:
                 label_target = None
