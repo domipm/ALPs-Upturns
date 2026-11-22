@@ -108,12 +108,11 @@ alps/
 fermi-out/
 gamma-out/
 logs/
+results/
 
 # Previously-developed code
 legacy/
-
-# Monte Carlo simulations (in progress)
-montecarlo/
+deprecated/
 
 # Ignore FITS files
 *.fits
