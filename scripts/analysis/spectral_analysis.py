@@ -22,7 +22,7 @@ from    gammapy.datasets            import  Datasets, Dataset
 from    gammapy.estimators          import  FluxPointsEstimator
 
 from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff, CompositeSpectralModel, EBLTableSpectralModel, CustomSmoothBrokenPowerLawSpectralModel
-from    alpsup.utils                import  get_source_list, get_source_info, par_uconv, tab_uconv, parse_kwargs
+from    alpsup.utils                import  get_source_list, get_source_info, par_uconv, tab_uconv, parse_kwargs, get_etau
 from    alpsup.logs                 import  init_log
 from    alpsup.plots                import  plot_sed_joint
 from    alpsup.paths                import  get_results_dir, CONFIGS_DIR
@@ -68,10 +68,20 @@ def run_spectral_fit(dataset: Datasets | Dataset, target: str, use_edec: bool = 
     log.info(results_joint)
     log.info(dataset.models[target])
 
-    # Compute decorrelation energy
+    # Use decorrelation energy as reference
     if use_edec:
 
+        # Compute decorrelation energy (making sure in TeV units)
         edec = dataset.models[target].spectral_model.pivot_energy
+        # Convert energy edges to TeV across all datasets and flatten
+        energy_edges = [edge.to(u.TeV) for ds in dataset for edge in dataset.energy_ranges]
+        emin = min(edge.min() for edge in energy_edges)
+        emax = max(edge.max() for edge in energy_edges)
+        # NOTE: Ensure minimum energy within safe mask, if HESS data only?
+        if "Fermi-LAT" not in dataset.names:
+            emin = np.max([emin.value, dataset["HESS"].energy_range_total[0].to("TeV").value]) * u.TeV
+        # NOTE: Bound decorrelation / reference energy within the energy edges of the dataset
+        edec = np.clip(edec.to("TeV"), emin, emax)
         log.info(f"Decorrelation energy: {edec:.6f}")
 
         # Get intrinsic spectral model
@@ -80,13 +90,20 @@ def run_spectral_fit(dataset: Datasets | Dataset, target: str, use_edec: bool = 
             intrinsic_model = dataset.models[target].spectral_model.intrinsic_model
 
         # Set amplitude as that of model evaluated at reference (improves convergence)
-        if intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
+        if intrinsic_model.__class__.__name__ in ["SmoothBrokenPowerLawSpectralModel"]:
             # Get "old" parameter values
             amplitude = dataset.models[target].parameters["amplitude"].quantity
             reference = dataset.models[target].parameters["reference"].quantity
             index1    = dataset.models[target].parameters["index1"].value
             # Compute new amplitude value
             dataset.models[target].parameters["amplitude"].quantity = amplitude * (edec / reference) ** ( - index1)
+        elif intrinsic_model.__class__.__name__ in ["CustomSmoothBrokenPowerLawSpectralModel"]:
+            # Get "old" parameter values
+            amplitude = dataset.models[target].parameters["amplitude"].quantity
+            reference = dataset.models[target].parameters["reference"].quantity
+            index    = dataset.models[target].parameters["index"].value
+            # Compute new amplitude value
+            dataset.models[target].parameters["amplitude"].quantity = amplitude * (edec / reference) ** ( - index)
         else:
             dataset.models[target].parameters["amplitude"].quantity = dataset.models[target].spectral_model(edec)
 
@@ -165,6 +182,8 @@ def main():
                         help = "Include bias prior on HESS dataset for systematic uncertainty (--bias, --no-bias).")
     parser.add_argument("--edec", action = argparse.BooleanOptionalAction, default = True,
                         help = "Use decorrelation energy as reference (--edec, --no-edec).")
+    parser.add_argument("--spatial", action = argparse.BooleanOptionalAction, default = True,
+                        help = "Use point spatial model for HESS dataset (--spatial, --no-spatial).")
     
     parser.add_argument("--plots-only", action = "store_true", help = "Generate output plots, without running the analysis")
 
@@ -275,6 +294,14 @@ def main():
 
     # TODO: PERFORM INTRINSIC SPECTRAL MODEL TEST?
 
+    # Define spatial model to use if required by arguments
+    spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs")
+    spatial_model_flat = spatial_model
+    if not args.spatial:
+        spatial_model_hess = None
+    else:
+        spatial_model_hess = spatial_model
+
     # Read model from HESS config file, if possible, and if model argument not given
 
     # Define target source model 
@@ -292,7 +319,7 @@ def main():
         target_model = SkyModel(
             name = target, datasets_names = ["HESS", "Fermi-LAT"],
             spectral_model = model,
-            spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs"), )
+            spatial_model = spatial_model, )
 
         # If a compound spectral model (containing EBL), choose intrinsic model only
         if isinstance(target_model, CompoundSpectralModel):
@@ -308,7 +335,7 @@ def main():
         target_model = SkyModel(
             name = target, datasets_names = ["HESS", "Fermi-LAT"],
             spectral_model = MODELS_EQUIV[args.model],
-            spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs"), )
+            spatial_model = spatial_model, )
         # Get intrinsic model
         target_model_intrinsic = target_model.spectral_model
 
@@ -336,20 +363,21 @@ def main():
         # Only add not-None datasets
         datasets_names = ["HESS"] + (["Fermi-LAT"] if dataset_flat is not None else []),
         spectral_model = CompositeSpectralModel(intrinsic_model = target_model_intrinsic, ebl_model = model_ebl, upturn_model = None, bias = 0.0),
-        spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs"), )
+        spatial_model = spatial_model, )
     
     # In all cases, freeze spatial model
     target_model.spatial_model.freeze()
 
     # For SmoothBrokenPowerLaw, set Ebreak initial value and bounds based on datasets
-    if target_model.spectral_model.intrinsic_model.__class__.__name__ == "SmoothBrokenPowerLawSpectralModel":
+    if target_model.spectral_model.intrinsic_model.__class__.__name__ in ["SmoothBrokenPowerLawSpectralModel", "CustomSmoothBrokenPowerLawSpectralModel"]:
         if kwargs.get("ebreak", None) is None:
             kwargs["ebreak"] = float(np.sqrt(dataset_energy_range[0] * dataset_energy_range[1]).value)
-        # TODO: Set break energy based on datasets! (same as value)
+        # NOTE: Set break energy based on datasets! (same as value)
         if kwargs.get("ebreak_min", None) is None:
             kwargs["ebreak_min"] = float(dataset_energy_range[0].value)
         if kwargs.get("ebreak_max", None) is None:
-            kwargs["ebreak_max"] = float(dataset_energy_range[-1].value)
+            # kwargs["ebreak_max"] = float(dataset_energy_range[-1].value)
+            kwargs["ebreak_max"] = float(get_etau(target_redshift, args.ebl, tau_lim = 1).value)       
         # NOTE: Free beta parameter? For now, leave fixed
         target_model.spectral_model.parameters["beta"].frozen = True
 
@@ -376,9 +404,10 @@ def main():
         target_model_bias = SkyModel(
             name = target, datasets_names = "HESS",
             spectral_model = CompositeSpectralModel(intrinsic_model = target_model_intrinsic, ebl_model = model_ebl, upturn_model = None, bias = 0.0),
-            spatial_model = PointSpatialModel(lon_0 = target_position.ra, lat_0 = target_position.dec, frame = "icrs"), )
-        # Freeze spatial model
-        target_model_bias.spatial_model.freeze()
+            spatial_model = spatial_model_hess, )
+        # Freeze spatial model if given
+        if args.spatial:
+            target_model_bias.spatial_model.freeze()
 
         # Wrap HESS dataset with bias prior (15%)
         dataset_hess_bias = BiasedPriorSpectrumDatasetOnOff.from_spectrum_dataset(
@@ -391,13 +420,14 @@ def main():
         # IN PRINCIPLE, ONLY HESS EVALUATES THE BIAS? MAYBE IT'S ENOUGH TO JUST HAVE THE BIASED DATASET ON HESS, AND SHARE MODEL?
 
         if dataset_flat is not None:
+
             # Create unbiased target model for Fermi-LAT, with linked parameters
             target_model_unbias = SkyModel(
                 name = f"{target} Unbiased",
                 datasets_names = "Fermi-LAT",
                 spectral_model = target_model_bias.spectral_model.intrinsic_model * target_model_bias.spectral_model.ebl_model, 
-                spatial_model = target_model_bias.spatial_model, )
-            # Freeze spatial model
+                spatial_model = spatial_model_flat, )
+            # Freeze spatial model (if present)
             target_model_unbias.spatial_model.freeze()
 
             # Use usual Fermi-LAT dataset
