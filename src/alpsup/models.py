@@ -430,7 +430,7 @@ class CustomSmoothBrokenPowerLawSpectralModel(SpectralModel):
         min = 0.10,
         max = 2.50,
         frozen = True, )
-    
+
     # Evaluate method - return function value
     @staticmethod
     def evaluate(energy, index, indexdelta, amplitude, ebreak, reference, beta):
@@ -533,7 +533,7 @@ class UpturnSpectralModel(SpectralModel):
         min = 0.1,
         max =  31.6,
         frozen = False, )
-    
+
     # Evaluate method - return function value
     @staticmethod
     def evaluate(energy, indexdelta_upt, beta_upt, e_upt):
@@ -541,9 +541,6 @@ class UpturnSpectralModel(SpectralModel):
         beta_upt *= np.sign(indexdelta_upt)
         # Return spectral model evaluated at energy and indices
         return (1 + (energy / e_upt) ** ( (indexdelta_upt) / beta_upt ) ) ** (- beta_upt)
-
-
-# TODO: GLOBAL WRAPPER THAT CONTAINS INTRINISC MODEL, EBL ABSORPTION, BIAS, AND UPTURN TERMS
 
 
 class CompositeSpectralModel(SpectralModel):
