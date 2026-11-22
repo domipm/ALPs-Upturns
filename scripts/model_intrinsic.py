@@ -24,10 +24,11 @@ from    gammapy.estimators          import  FluxPointsEstimator
 from    gammapy.modeling            import  Fit
 from    gammapy.modeling.models     import  (
             Models, SkyModel,
-            PowerLawSpectralModel, LogParabolaSpectralModel, SmoothBrokenPowerLawSpectralModel, TemplateSpectralModel, )
+            PowerLawSpectralModel, LogParabolaSpectralModel, TemplateSpectralModel, )
 
-from    utils                       import  get_source_info, parse_kwargs
-from    models                      import  BiasedCompoundSpectralModel
+from    alpsup.utils                import  get_source_info, parse_kwargs
+from    alpsup.paths                import  get_results_dir
+from    alpsup.models               import  BiasedPriorSpectrumDatasetOnOff
 
 
 if __name__ == "__main__":
@@ -54,12 +55,18 @@ if __name__ == "__main__":
         kwargs = parse_kwargs(args.kwargs)
 
     # Get info of source
-    target_4FGL, target_position, target_redshift = get_source_info(target)
+    source = get_source_info(target)
+    target_4FGL = source.name_4FGL
+    target_position = source.position
+    target_redshift = source.redshift
+    target_instruments = source.inst
 
     # Load joint datasets and models
     dataset_joint = Datasets.read(
-        filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/{args.dataset}_datasets.yaml",
-        filename_models = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/{args.dataset}_models.yaml", )
+        filename = get_results_dir(target, args.bblock, args.ebl, output = "gamma-out") / "joint_datasets.yaml",
+        filename_models = get_results_dir(target, args.bblock, args.ebl, output = "gamma-out") / "joint_models.yaml", )
+        # filename = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/{args.dataset}_datasets.yaml",
+        # filename_models = f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/{args.dataset}_models.yaml", )
     
     # Extract best-fit parameters for the target source model (take only intrinsic spectral model)
     bf_params = dataset_joint.models[target].spectral_model.parameters
@@ -242,11 +249,9 @@ if __name__ == "__main__":
     scores["CurvatureTest"] = {"model": model_pref, "sigma": sigma_pref}
 
     # Save total statistic values and number of free parameters for each model
-    with open(f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/intrinsic_scores.yaml", "w") as f:
-        yaml.dump(
-            scores, f,
-            sort_keys = False,
-            default_flow_style = False, )
+    # with open(f"{os.environ['RESULTS']}/{target}/{args.bblock}/gamma-out/intrinsic_scores.yaml", "w") as f:
+    # with open(get_results_dir(target, args.bblock, output = "gamma-out") / "intrinsic_scores.yaml", "w") as f:
+    #     yaml.dump(scores, f, sort_keys = False, default_flow_style = False, )
 
     # Custom legend handles (for black square and circle)
     custom_handles = [
@@ -265,7 +270,8 @@ if __name__ == "__main__":
     plt.title(f"{target} Spectral Model Comparison")
     # Create combined legend
     plt.legend(handles, labels)
-    plt.savefig(f"{os.environ['RESULTS']}/{target}/{args.bblock}/plots/intrinsic_model.pdf", bbox_inches = "tight")
+    # plt.savefig(f"{os.environ['RESULTS']}/{target}/{args.bblock}/plots/intrinsic_model.pdf", bbox_inches = "tight")
+    # plt.savefig(get_results_dir(target, args.bblock, output = "plots") / "intrinsic_model.pdf", bbox_inches = "tight")
     plt.close()
 
     # TODO: If sigma greater than threshold, update bblocks.yaml file with best-fit model
