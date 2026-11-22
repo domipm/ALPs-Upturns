@@ -38,7 +38,12 @@ from    upturn_modeling             import  setup_upturn_model, run_upturn_model
 from    likelihood_analysis         import  interp_alp_upturn
 
 # Import parameters from ALP simulations
-from    alps_simulations            import  MALP, B0, N0, L0, GALP_LIST
+# from    alps_simulations            import  MALP, B0, N0, L0, GALP_LIST
+MALP = 1e-3
+B0 = 0.001
+N0 = 1e-7
+L0 = 1e4
+GALP_LIST = np.logspace(-2, +1, 30)
 
 
 # Get logger function
@@ -95,7 +100,7 @@ def main():
     # Keep track of simulation ID or number of simulations to perform!
     parser.add_argument("--sim-id", required = True, type = int,
                         help = "Monte Carlo simulation ID (for NoALP case) or number of simulations to perform per coupling (for ALP case).")
-
+    parser.add_argument("--galp-idx", required = False, type = int, default = None, help = "Run only a single ALP coupling")
     # Compute flux points or not (for saving time, once established fit converges)
     parser.add_argument("--fluxp", action = argparse.BooleanOptionalAction, default = True,
                         help = "Compute and plot flux points (--fluxp, --no-fluxp).")
@@ -401,15 +406,16 @@ def main():
         # ================================== #
 
 
-        # TODO: Loop over all couplings!
-        for galp in GALP_LIST:
+        # Loop over all couplings!
+        for k, galp in enumerate(GALP_LIST):
 
-            # TODO: UNDERSAMPLE?
-
-            # TODO: CHECK WHICH COUPLINGS ALREADY FINISHED TO RESUME
+            # If coupling index argument given, run just that one!
+            if args.galp_idx is not None:
+                if k != args.galp_idx:
+                    continue
 
             log.info(f"Processing coupling g_alp = {galp:g}")
-
+            
             # New subfolder for each coupling!
             dir_mcout_galp = get_results_dir(f"MONTECARLO/{target}", args.bblock, args.ebl, output = f"{args.mode}/sim_{args.sim_id:05d}/g{galp:g}")
 
@@ -438,9 +444,14 @@ def main():
             # Load dataset
             datasets = Datasets.read(
                         filename = dir_gout / f"joint_datasets.yaml",
-                        filename_models = dir_gout / f"joint_models.yaml", )
+                        filename_models = dir_gout / f"joint_models.yaml", 
+                        checksum = False, )
 
             # NOTE: IMPORTANT - READING DATASETS DOESN'T ENSURE LINKED PARAMETERS REMAIN LINKED!
+
+            # NOTE: Check if Fermi-LAT also needs upturn model?
+            model_upturn = UpturnSpectralModel(
+                    e_upt = e_upt_alp, indexdelta_upt = indexdelta_upt_alp)
 
             # Define spectral model for Fermi-LAT (unbiased, with the same upturn as HESS)
             models_upt = Models()
@@ -457,7 +468,7 @@ def main():
                             intrinsic_model = datasets.models[target].spectral_model.intrinsic_model,
                             ebl_model = datasets.models[target].spectral_model.ebl_model,
                             bias = 0,
-                            upturn_model = None, ) ) )
+                            upturn_model = model_upturn, ) ) )
                 # Freeze bias for Fermi-LAT model
                 models_upt[f"{target} Unbiased"].spectral_model.parameters["bias"].frozen = True
             # NOTE: Append upturn model to HESS dataset (parameters should still be linked)
@@ -470,15 +481,13 @@ def main():
                             intrinsic_model = datasets.models[target].spectral_model.intrinsic_model,
                             ebl_model = datasets.models[target].spectral_model.ebl_model,
                             bias = datasets.models[target].spectral_model.bias,
-                            upturn_model = UpturnSpectralModel(
-                                indexdelta_upt = indexdelta_upt_alp, 
-                                e_upt = e_upt_alp), ) ) )
+                            upturn_model = model_upturn, ) ) )
                 # NOTE: Freeze upturn parameters for HESS dataset
                 models_upt[target].spectral_model.parameters["indexdelta_upt"].frozen = True
                 models_upt[target].spectral_model.parameters["e_upt"].frozen = True
             datasets.models = models_upt
 
-            log.info(models_upt[target])
+            log.info(models_upt[target].spectral_model)
 
             # Generate simulated dataset
             datasets_sim = simulate_dataset(datasets)
@@ -493,13 +502,24 @@ def main():
                 overwrite = True, )
 
             # NOTE: Before continuing with the rest of the analysis
-            # remove the upturn model from the dataset! The simulated data will already contained the
-            # effects of the ALP-simualted upturn.
+            # remove the upturn model from the dataset! The simulated data will already contained the effects of the ALP-simualted upturn.
             models = Models()
             # Keep all Fermi-LAT models if present
             if "Fermi-LAT" in datasets_sim.names:
                 for model in datasets_sim["Fermi-LAT"].models:
-                    models.append(model)
+                    if model.name != f"{target} Unbiased":
+                        models.append(model)
+                models.append(
+                        SkyModel(
+                            name = f"{target} Unbiased", datasets_names = "Fermi-LAT",
+                            spatial_model = datasets.models[target].spatial_model,
+                            spectral_model = CompositeSpectralModel(
+                                intrinsic_model = datasets.models[target].spectral_model.intrinsic_model,
+                                ebl_model = datasets.models[target].spectral_model.ebl_model,
+                                bias = 0.00,
+                                upturn_model = None), ) )
+                # Freeze the bias
+                models[f"{target} Unbiased"].spectral_model.parameters["bias"].frozen = True
             # Use model without an upturn for the intrinsic modeling
             if "HESS" in datasets_sim.names:
                 models.append(
@@ -513,6 +533,8 @@ def main():
                             upturn_model = None), ) )
             datasets_sim.models = models
 
+            log.info(datasets_sim.models[f"{target}"])
+            log.info(datasets_sim.models[f"{target} Unbiased"])
 
             # ====================== #
             # INTRINSIC SPECTRAL FIT #
@@ -545,6 +567,9 @@ def main():
             plt.tight_layout()
             plt.savefig(dir_mcout_galp / "intrinsic_fit.png", dpi = 300, bbox_inches = "tight")
             plt.close()
+ 
+            # Save results of the fit to file
+            fit_results.write(path = dir_mcout_galp / "intrinsic_fit.yaml", overwrite = True, full_output = True, overwrite_templates = True, write_covariance = True, checksum = False)
 
 
             # =============== #
