@@ -1,193 +1,264 @@
-#!/opt/homebrew/bin/bash
+#!/bin/bash
 echo "Running under bash $BASH_VERSION"
 
-set -e # Exit on error
-set -u # Exit on undefined
+# Set errors!
+set -euo pipefail
 
-# Define array of all sources names
-declare -a ALL_SOURCES
-ALL_SOURCES=("1ES0229+200" "1ES0347-121" "1ES0414+009" "1ES1101-232" "1ES1312-423" "1RXSJ101015.9-311909" "3C279" "GRB180720B" "H2356-309" "PG1553+113" "PKS0346-27" "PKS0447-439" "PKS0903-57" "PKS1510-089" "PKS2155-304")
+# Get directory of this script
+BASH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get directory of analysis scripts
+SCRIPT_ROOT="${SCRIPT_ROOT:-$BASH_ROOT/../analysis}"
+# Get directory for log files
+LOG_ROOT="${LOG_ROOT:-$BASH_ROOT/logs}"
 
-# Define array of blocks
-declare -A SOURCE_BLOCKS
-# Define array of datasets
-declare -A SOURCE_DATASETS
+# Define conda environment to use
+CONDA_ENV="${CONDA_ENV:-alps-upturns}"
 
-for src in "${ALL_SOURCES[@]}"; do
-    # By default, single block
-    SOURCE_BLOCKS[$src]="1"
-    # By default, H.E.S.S. + Fermi-LAT dataset
-    SOURCE_DATASETS[$src]="hess"
-done
+# Define list of considered EBL models
+EBL_MODELS=(dominguez franceschini finke2022 saldana-lopez)
 
-# Set Bayesian blocks (wherever not just one)
-# TODO: Instead of array, just number of blocks
-SOURCE_BLOCKS["1ES1101-232"]="2"
-SOURCE_BLOCKS["PKS0903-57"]="3"
-SOURCE_BLOCKS["PKS2155-304"]="8"
 
-# Set datasets per source (wherever not just joint)
-SOURCE_DATASETS["H2356-309"]="hess"
-SOURCE_DATASETS["PKS2155-304"]="hess"
+# Define functions
 
-# List of EBL models considered (default "all")
-ALL_EBL_MODELS=("dominguez" "franceschini" "finke" "saldana-lopez")
 
-# Name of conda environment
-CONDA_ENV="alps-upturns"
-# Directory location of scripts
-SCRIPT_DIR="scripts/analysis"
+error()    { echo "Error: $*" >&2; exit 2; }
+warn()     { echo "Warning: $*" >&2; }
+is_uint()  { [[ "$1" =~ ^[0-9]+$ ]]; }
+need_val() { (( $2 >= 2 )) || error "Option $1 requires a value"; }
+add_csv()  {
+  local -n _arr=$1
+  local -a _parts
+  IFS=',' read -ra _parts <<< "$2"
+  _arr+=("${_parts[@]}")
+}
+has_all()  {
+  local x
+  for x in "$@"; do [[ "${x,,}" == "all" ]] && return 0; done
+  return 1
+}
 
-# Default options
-SCRIPT="model_upturns.py"
-SOURCES=()
-EBL_MODELS=()
-DATASET_OVERRIDE=""
-BLOCK_OVERRIDE=""
-DRY_RUN=false
-EXTRA_ARGS=()
+# Display usage
 
-# Display usage
+
 usage() {
   cat << EOF
-Parameterized runner for analysis scripts
-
-Usage:
-  ./run_scripts.sh [options] [-- extra kwargs passed straight to the python script]
-
-Options:
-  -s, --script SCRIPT       Python script to run (default: model_upturns.py)
-  -o, --source SOURCE       Source name, or "all" (default: all). Repeatable.
-  -e, --ebl EBL             EBL model, or "all" (default: dominguez). Repeatable.
-  -d, --dataset DATASET     Dataset override: hess|joint|all.
-                            Default: whatever each source actually has.
-  -b, --block BLOCK         Block override, e.g. "block2". Default: all blocks
-                            defined for that source.
-  -n, --dry-run             Print the commands instead of running them.
-  -p, --plots-only          Generate only plots. Default: false
-  -l, --list                List known sources (and their blocks/datasets) and exit.
-  -h, --help                Show this help.
-  -k, --kwargs              Keyword arguments for selected script.
-
-Anything after "--kwargs" is appended verbatim as extra kwargs to every python call,
-  e.g.:  ./run_scripts.sh -o 3C279 --kwargs --overwrite --verbose
-
-Examples:
-  ./run_scripts.sh                                    # everything (old behaviour)
-  ./run_scripts.sh -o 3C279                           # one source, all its blocks/datasets
-  ./run_scripts.sh -o 3C279 -o PG1553+113             # a couple of sources
-  ./run_scripts.sh -e all                             # every source x every EBL model
-  ./run_scripts.sh -o PKS2155-304 -b block3 -d hess   # one source, one block, one dataset
-  ./run_scripts.sh -s other_script.py -o all -n       # dry-run a different script
+  Sample text!
 EOF
   exit 1
 }
 
-# Get a list of all sources, and their time segmentation and datasets
-list_sources() {
-  local src
-  for src in $(printf '%s\n' "${!SOURCE_BLOCKS[@]}" | sort); do
-    echo "$src"
-    echo "    blocks:   ${SOURCE_BLOCKS[$src]}"
-    echo "    datasets: ${SOURCE_DATASETS[$src]}"
-  done
-}
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
+# Parse arguments
+
+
+# Main configs
+SCRIPT=""
+SOURCES=()
+EBLS=()
+BBLOCKS=()
+SIM_IDS=""
+
+# Just list the sources and blocks available
+LIST_ONLY=false
+
+# Parallel job config
+NJOBS=1
+THREADS=1
+DRY_RUN=false
+RESUME_MODE=""
+
+# Additional arguments
+KWARGS=()
+
+# Read all arguments
+while (( $# )); do
   case "$1" in
-    -s|--script)      SCRIPT="$2"; shift 2 ;;
-    -o|--source)      SOURCES+=("$2"); shift 2 ;;
-    -e|--ebl)         EBL_MODELS+=("$2"); shift 2 ;;
-    -d|--dataset)     DATASET_OVERRIDE="$2"; shift 2 ;;
-    -b|--block)       BLOCK_OVERRIDE="${2#block}"; shift 2 ;;  # strip leading "block" if given
-    -n|--dry-run)     DRY_RUN=true; shift ;;
-    -p|--plots-only)  PLOTS_ONLY=false; shift;;
-    -l|--list)        list_sources; exit 0 ;;
-    -h|--help)        usage; exit 0 ;;
-    -k|--kwargs)      shift; EXTRA_ARGS=("$@"); break ;;
-    *)             echo "Unknown option: $1" >&2; usage; exit 1 ;;
+    # Script to eXecute
+    -x|--script)	need_val "$1" $#; SCRIPT="$2"; shift 2 ;;
+    # Common parameters in all scripts
+    -s|--source)	need_val "$1" $#; add_csv SOURCES "$2"; shift 2 ;;
+    -e|--ebl) 		need_val "$1" $#; add_csv EBLS "$2"; shift 2 ;;
+    -b|--bblock)	need_val "$1" $#; add_csv BBLOCKS "$2"; shift 2 ;;
+    # Monte Carlo simulations
+    -i|--sim-ids)	need_val "$1" $#; SIM_IDS="$2"; shift 2 ;;
+    # Parallelization parameters
+    -j|--njobs)		need_val "$1" $#; NJOBS="$2"; shift 2 ;;
+    -t|--threads)       need_val "$1" $#; THREADS="$2"; shift 2 ;;
+    -d|--dry-run)       DRY_RUN=true; shift ;;
+    -r|--resume)        RESUME_MODE="resume"; shift ;;
+    -R|--resume-failed) RESUME_MODE="resume-failed"; shift ;;
+    # Utilities and other arguments
+    -l|--list)		LIST_ONLY=true; shift ;;
+    -h|--help)		usage; exit 0 ;;
+    --kwargs)		shift; KWARGS=("$@"); break ;;
+    -*)			error "Unknown option $1" ;;
+    *)			[[ -z "$SCRIPT" ]] || error "Unexpected argument: $1"
+	    		SCRIPT="$1"; shift ;;
   esac
 done
 
-# Defaults for source/ebl if nothing was passed
-if [[ ${#SOURCES[@]} -eq 0 ]]; then
-  SOURCES=("all")
-fi
-if [[ ${#EBL_MODELS[@]} -eq 0 ]]; then
-  EBL_MODELS=("dominguez")
-fi
 
-# Expand "all"
-if [[ "${SOURCES[*]}" == "all" ]]; then
-  SOURCES=($(printf '%s\n' "${!SOURCE_BLOCKS[@]}" | sort))
-fi
-if [[ "${EBL_MODELS[*]}" == "all" ]]; then
-  EBL_MODELS=("${ALL_EBL_MODELS[@]}")
-fi
+# Check NJOBS and THREADS are integers!
+is_uint "$NJOBS" && (( NJOBS >= 1 )) || error "NJOBS must be a positive integer!"
+is_uint "$THREADS" && (( THREADS >= 1 )) || error "THREADS must be a positive integer!"
 
-# Validate sources
-for src in "${SOURCES[@]}"; do
-  if [[ -z "${SOURCE_BLOCKS[$src]:-}" ]]; then
-    echo "Unknown source: '$src'. Use --list to see known sources." >&2
-    exit 1
-  fi
+
+# Check scripts and directory
+[[ -f "$SCRIPT_ROOT/$SCRIPT" ]] || error "Script $SCRIPT_ROOT/$SCRIPT not found!"
+[[ -d "$SCRIPT_ROOT" ]] || error "Script analysis directory not found!"
+
+
+# Setup conda environment
+set +u
+eval "$(conda shell.bash hook)"
+conda activate "$CONDA_ENV"
+echo "Conda environment activated: $CONDA_ENV"
+set -u
+
+
+# Get list of all sources and blocks (only if source and blocks not given)
+mapfile -t ALL_SOURCES < <(python -c "from alpsup.utils import get_source_list; print('\n'.join(get_source_list()))")
+mapfile -t NBLOCKS < <(python -c "from alpsup.utils import get_source_nblocks; print('\n'.join(map(str, get_source_nblocks())))")
+
+# Ensure source list and block correct
+(( ${#ALL_SOURCES[@]} > 0 )) || error "Could not load the source list from alpsup.utils"
+(( ${#ALL_SOURCES[@]} == ${#NBLOCKS[@]} )) || error "Source list and block counts differ in length"
+
+
+# Define source and block list
+declare -A SOURCE_BLOCKS
+for i in "${!ALL_SOURCES[@]}"; do
+  SOURCE_BLOCKS["${ALL_SOURCES[$i]}"]="${NBLOCKS[$i]}"
 done
 
-# Setup conda environment
-if ! $DRY_RUN; then
-  # conda activate needs conda's shell hook sourced first when run non-interactively
-  eval "$(conda shell.bash hook)"
-  conda activate "$CONDA_ENV"
-  cd "$SCRIPT_DIR"
+
+# List all sources and number of blocks
+if $LIST_ONLY; then
+  for src in "${ALL_SOURCES[@]}"; do
+    printf '%24s blocks: %s\n' "$src" "${SOURCE_BLOCKS[$src]}"
+  done
+  exit 0
 fi
 
-# Run script for all sources, time blocks segmentation, ebl models
+
+# Expand and validate selections
+
+
+# Expand sources list
+if (( ${#SOURCES[@]} == 0 )) || has_all "${SOURCES[@]}"; then SOURCES=("${ALL_SOURCES[@]}"); fi
+# Expand EBL list
+if (( ${#EBLS[@]} == 0 )); then EBLS=(dominguez); fi
+if has_all "${EBLS[@]}"; then EBLS=("${EBL_MODELS[@]}"); fi
+
+# Check given sources
 for src in "${SOURCES[@]}"; do
-  echo "$src"
+  [[ -n "${SOURCE_BLOCKS[$src]:-}" ]] || error "Unkown source '$src'. Use --list to see known sources."
+done
 
-  # blocks: override if given, else whatever this source has
-  if [[ -n "$BLOCK_OVERRIDE" ]]; then
-    blocks="$BLOCK_OVERRIDE"
+# Check given blocks
+for i in "${!BBLOCKS[@]}"; do
+  BBLOCKS[$i]="${BBLOCKS[$i]#block}"
+  is_uint "${BBLOCKS[$i]}" || error "Invalid block '${BBLOCKS[$i]}'"
+done
+
+# Expand simulation ids
+SIM_LIST=("")
+if [[ -n "$SIM_IDS" ]]; then
+  if [[ "$SIM_IDS" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    mapfile -t SIM_LIST < <(seq "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
+  elif is_uint "$SIM_IDS"; then
+    SIM_LIST=("$SIM_IDS")
   else
-    n_blocks="${SOURCE_BLOCKS[$src]}"
-    blocks=$(seq 1 "$n_blocks")
+    error "--sim-ids must be an integer N or an integer range A-B"
   fi
+fi
 
-  # datasets: override if given (and warn if the source doesn't actually have it),
-  # else whatever this source has
-  if [[ -n "$DATASET_OVERRIDE" ]]; then
-    if [[ "$DATASET_OVERRIDE" == "all" ]]; then
-      datasets="${SOURCE_DATASETS[$src]}"
-    else
-      if [[ " ${SOURCE_DATASETS[$src]} " != *" $DATASET_OVERRIDE "* ]]; then
-        echo "  [skip] $src has no '$DATASET_OVERRIDE' dataset (has: ${SOURCE_DATASETS[$src]})"
-        continue
+
+# Setup log directories
+LOG_DIR="$LOG_ROOT/${SCRIPT%.py}"
+JOBFILE="$LOG_DIR/jobs.txt"
+JOBLOG="$LOG_DIR/joblog.tsv"
+JOBFAILED="$LOG_DIR/failed_runs.txt"
+
+
+# Define joblist
+JOBS=()
+# Loop over all sources (or the sources given)
+for src in "${SOURCES[@]}"; do
+  nb="${SOURCE_BLOCKS[$src]}"
+  if (( ${#BBLOCKS[@]} )); then
+    blocks=("${BBLOCKS[@]}")
+  else
+    mapfile -t blocks < <(seq 1 "$nb")
+  fi
+  # Loop over all EBL models (or those given)
+  for ebl in "${EBLS[@]}"; do
+    for b in "${blocks[@]}"; do
+      if (( b < 1 || b > nb )); then
+        warn "$src has blocks 1..$nb, skipping block$b"
+	continue
       fi
-      datasets="$DATASET_OVERRIDE"
-    fi
-  else
-    datasets="${SOURCE_DATASETS[$src]}"
-  fi
-  # ebl models: override if given
-  for ebl in "${EBL_MODELS[@]}"; do
-    for b in $blocks; do
-      bblock="block${b}-${ebl}"
-      for dataset in $datasets; do
-        # if $PLOTS_ONLY; then
-        # else
-        # fi
-        cmd=(python "$SCRIPT" --source "$src" --bblock "$bblock" --ebl "$ebl" \
-             --plots-only --dataset "$dataset" "${EXTRA_ARGS[@]}")
-        if $DRY_RUN; then
-          echo "  [dry-run] ${cmd[*]}"
-        else
-          echo "  ${cmd[*]}"
-          "${cmd[@]}"
-        fi
+      # Loop over all simulations
+      for sim in "${SIM_LIST[@]}"; do
+        tag="${src}_block${b}_${ebl}"
+	cmd=(env "OMP_NUM_THREADS=$THREADS" "OPENBLAS_NUM_THREADS=$THREADS" python "$SCRIPT" --source "$src" --bblock "block$b" --ebl "$ebl")
+	if [[ -n "$sim" ]]; then
+          cmd+=(--sim-id "$sim")
+	  tag+="_sim${sim}"
+	fi
+	cmd+=("${KWARGS[@]}")
+	line="$(printf '%q ' "${cmd[@]}")> $(printf '%q' "$LOG_DIR/$tag.log") 2>&1"
+	JOBS+=("$line")
       done
     done
   done
 done
 
+
+# Check if any jobs are given!
+(( ${#JOBS[@]} > 0 )) || error "No jobs to run!"
+
+
+# Dry run
+if $DRY_RUN; then
+  echo "# cd $SCRIPT_ROOT"
+  printf '%s\n' "${JOBS[@]}"
+  echo "# ${#JOBS[@]} job(s), $NJOBS in parallel, logs in $LOG_DIR"
+  exit 0
+fi
+
+
+# Run jobs
+
+
+command -v parallel > /dev/null || error "GNU parallel not found!"
+mkdir -p "$LOG_DIR"
+printf '%s\n' "${JOBS[@]}" > "$JOBFILE"
+cd "$SCRIPT_ROOT"
+
+export PARALLEL_SHELL=bash
+
+par_opts=(--jobs "$NJOBS" --joblog "$JOBLOG" --bar)
+[[ -n "$RESUME_MODE" ]] && par_opts+=("--$RESUME_MODE")
+
+
+echo "Running ${#JOBS[@]} job(s) of $SCRIPT, $NJOBS in parallel (logs: $LOG_DIR)"
+
+
+rc=0
+parallel "${par_opts[@]}" < "$JOBFILE" || rc=$?
+
+# Check for failed runs!
+awk -F'\t' 'NR > 1 { ex[$9] = $7 } END { for (c in ex) if (ex[c] != 0) print c }' "$JOBLOG" | sort > "$JOBFAILED"
+nfail=$(wc -l < "$JOBFAILED" | tr -d ' ')
+
+if (( nfail > 0 )); then
+  echo -e "\033[0;31m${nfail} job(s) failed\033[0m. Commands in $JOBFAILED"
+  echo "Retry them with the same command plus --resume-failed"
+  exit 1
+fi
+
+(( rc == 0 )) || { echo "parallel exited with status $rc" >&2; exit "$rc"; }
 echo -e "\033[0;32mDone! :)\033[0m"
+
+
