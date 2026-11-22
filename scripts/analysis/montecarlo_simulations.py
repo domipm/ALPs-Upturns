@@ -34,7 +34,7 @@ from    alpsup.logs                 import  init_log
 
 # Import required functions from main analysis
 from    spectral_analysis           import  run_spectral_fit, run_fluxp_estimator
-from    upturn_modeling             import  setup_upturn_model, run_upturn_model
+from    scripts.analysis.legacy.upturn_modeling_intermediate             import  setup_upturn_model, run_upturn_model
 from    likelihood_analysis         import  interp_alp_upturn
 
 # Import parameters from ALP simulations
