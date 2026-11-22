@@ -146,7 +146,6 @@ def plot_interp_histogram(ts: np.ndarray, c_alp: float, c_noalp: float, c_min: f
     Plot diagnostic histogram of interpolated C-stat values for the target-block pair
     """
 
-
     # Initialize plots
     fig, ax = plt.subplots()
     # Plot hisogram
@@ -252,7 +251,7 @@ def plot_ebl_comparison(couplings: np.ndarray, ebl_models: list[str], odir: Path
     fig, ax = plt.subplots()
     # Set labels and titles
     ax.set_xlabel(r"$g_{a\gamma}$ [GeV$^{-1}$]")
-    ax.set_ylabel(r"$\lambda(g_{a\gamma}) \sim C_{\text{ALP}} - C_{\text{NoALP}}$")
+    ax.set_ylabel(r"$\lambda(g_{a\gamma}) = C_{\text{ALP}}(g_{a\gamma}) - \min_{g_{a\gamma}}[C_{\text{ALP}}(g_{a\gamma})]$")
     ax.set_title(f"ALPs Likelihood Curve {DATASET_LABEL.get(dataset, dataset)} EBL Comparison")
 
     # Loop over each EBL model
@@ -415,6 +414,7 @@ def process_ebl(ebl: str, results_dir: Path, odir: Path, args: argparse.Namespac
                 hist_path = (results_dir / target / block / "alps" / ebl
                              / f"interp_ts_hist_{ebl}.pdf")
                 hist_path.parent.mkdir(parents = True, exist_ok = True)
+
                 plot_interp_histogram(
                     ts, c_alp, c_noalp, cstat_min,
                     target, block, ebl, hist_path, )
